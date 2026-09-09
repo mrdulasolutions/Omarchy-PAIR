@@ -1,0 +1,501 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright (c) 2026 MR Dula Solutions
+# SPDX-License-Identifier: MIT
+#
+# Install, update, uninstall, launch, and report NVIDIA Personal AI Router
+# (PAIR) on Omarchy. No sudo. The official NVIDIA Linux package is a .deb
+# for Debian/Ubuntu; this extracts that package into ~/.local.
+
+set -euo pipefail
+export PATH="/usr/bin:/usr/local/bin:${PATH:-}"
+# debug: prove the panel actually spawned us
+{ printf '%s %s\n' "$(date -Is)" "$*"; } >>"${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair/ctl.log" 2>/dev/null || true
+
+PLUGIN_ID="io.github.mrdulasolutions.pair"
+PLUGIN_VERSION="1.0.0"
+UPSTREAM_REPO="NVIDIA/Personal-AI-Router"
+INSTALL_ROOT="${PAIR_HOME:-$HOME/.local/opt/PAIR}"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair"
+STATE_FILE="$STATE_DIR/installed.json"
+LATEST_CACHE="$STATE_DIR/latest.json"
+BIN_DIR="$HOME/.local/bin"
+DESKTOP_DIR="$HOME/.local/share/applications"
+ICON_ROOT="$HOME/.local/share/icons/hicolor"
+USER_AGENT="omarchy-pair-plugin/${PLUGIN_VERSION}"
+API_URL="https://api.github.com/repos/${UPSTREAM_REPO}/releases/latest"
+
+usage() {
+  cat <<'EOF'
+Usage: pair-ctl <command>
+
+  status [--check-latest]   Print JSON describing this machine
+  install [--version TAG]   Download NVIDIA PAIR and install it user-locally
+  update                    Install the latest NVIDIA PAIR release
+  uninstall [--purge]       Remove the app (keep cluster data unless --purge)
+  launch                    Start the PAIR desktop app
+  stop                      Ask the PAIR desktop app to quit
+
+Omarchy is Arch-based. Do not apt-install the NVIDIA .deb.
+Do not use PAIR's in-app updater on Omarchy; it expects Debian.
+Update the app with: pair-ctl update
+Update this plugin with: omarchy plugin update io.github.mrdulasolutions.pair
+EOF
+}
+
+log() {
+  printf '%s\n' "$*" >&2
+}
+
+die() {
+  emit_json 0 "$1"
+  exit 1
+}
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
+}
+
+arch_deb() {
+  case "$(uname -m)" in
+    x86_64 | amd64) printf '%s\n' amd64 ;;
+    aarch64 | arm64) printf '%s\n' arm64 ;;
+    *) die "unsupported architecture: $(uname -m) (need x86_64 or aarch64)" ;;
+  esac
+}
+
+pair_running() {
+  pgrep -f "$HOME/.local/opt/PAIR/nvpair( |$)" >/dev/null 2>&1 \
+    || pgrep -x nvpair >/dev/null 2>&1
+}
+
+has_nvidia_gpu() {
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi -L >/dev/null 2>&1 && return 0
+  fi
+  lspci 2>/dev/null | grep -qi 'nvidia' || return 1
+}
+
+installed_version() {
+  if [[ -f $STATE_FILE ]]; then
+    jq -r '.pairVersion // empty' "$STATE_FILE" 2>/dev/null || true
+  fi
+}
+
+pair_binary_present() {
+  [[ -x $INSTALL_ROOT/nvpair ]]
+}
+
+read_cached_latest() {
+  [[ -f $LATEST_CACHE ]] || return 1
+  local age
+  age=$(($(date +%s) - $(stat -c %Y "$LATEST_CACHE" 2>/dev/null || echo 0)))
+  ((age >= 0 && age < 3600)) || return 1
+  jq -e '.tag and .version and .debUrl' "$LATEST_CACHE" >/dev/null 2>&1
+}
+
+fetch_latest() {
+  local force="${1:-0}"
+  if ((force == 0)) && read_cached_latest; then
+    return 0
+  fi
+  mkdir -p "$STATE_DIR"
+  local json
+  json=$(curl -fsSL -A "$USER_AGENT" --max-time 20 "$API_URL") || {
+    log "could not reach GitHub releases for $UPSTREAM_REPO"
+    return 1
+  }
+  local arch tag version name url
+  arch=$(arch_deb)
+  tag=$(jq -r '.tag_name // empty' <<<"$json")
+  [[ -n $tag ]] || { log "GitHub latest release has no tag_name"; return 1; }
+  version="${tag#v}"
+  name=$(jq -r --arg arch "$arch" '
+    .assets[]
+    | select(.name | test("NVPAIR-Setup-.*-" + $arch + "\\.deb$"))
+    | .name
+  ' <<<"$json" | head -n1)
+  url=$(jq -r --arg arch "$arch" '
+    .assets[]
+    | select(.name | test("NVPAIR-Setup-.*-" + $arch + "\\.deb$"))
+    | .browser_download_url
+  ' <<<"$json" | head -n1)
+  [[ -n $url && -n $name ]] || { log "no NVPAIR-Setup-*-${arch}.deb on the latest GitHub release"; return 1; }
+  jq -n \
+    --arg tag "$tag" \
+    --arg version "$version" \
+    --arg arch "$arch" \
+    --arg name "$name" \
+    --arg debUrl "$url" \
+    '{tag:$tag, version:$version, arch:$arch, name:$name, debUrl:$debUrl, fetchedAt:(now|todateiso8601)}' \
+    >"$LATEST_CACHE"
+}
+
+version_gt() {
+  local a="$1" b="$2"
+  [[ -n $a && -n $b && $a != "$b" ]] || return 1
+  [[ $(printf '%s\n' "$a" "$b" | sort -V | tail -n1) == "$b" ]]
+}
+
+write_wrappers() {
+  mkdir -p "$BIN_DIR" "$DESKTOP_DIR"
+  cat >"$BIN_DIR/nvpair" <<EOF
+#!/bin/sh
+# NVIDIA Personal AI Router terminal UI (matches the official Debian wrapper).
+# Do not run this while the desktop app is open.
+exec "$INSTALL_ROOT/resources/cli-bin/nvpair-tui" "\$@"
+EOF
+  cat >"$BIN_DIR/nvpair-desktop" <<EOF
+#!/bin/sh
+# NVIDIA Personal AI Router desktop application (Omarchy / Hyprland).
+exec "$INSTALL_ROOT/nvpair" --ozone-platform-hint=auto "\$@"
+EOF
+  chmod 0755 "$BIN_DIR/nvpair" "$BIN_DIR/nvpair-desktop"
+  cat >"$DESKTOP_DIR/nvpair.desktop" <<EOF
+[Desktop Entry]
+Name=Personal AI Router
+Exec=$BIN_DIR/nvpair-desktop %U
+Terminal=false
+Type=Application
+Icon=nvpair
+StartupWMClass=PAIR
+Actions=Exit;
+Comment=NVIDIA Personal AI Router — local inference router
+Categories=Utility;
+Keywords=PAIR;NVIDIA;AI;Ollama;LM Studio;
+
+[Desktop Action Exit]
+Name=Exit Personal AI Router
+Exec=$BIN_DIR/nvpair-desktop --exit-application
+EOF
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
+  fi
+}
+
+install_icons_from() {
+  local src_root="$1"
+  local sz src dest
+  for sz in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
+    src="$src_root/usr/share/icons/hicolor/$sz/apps/nvpair.png"
+    [[ -f $src ]] || continue
+    dest="$ICON_ROOT/$sz/apps"
+    mkdir -p "$dest"
+    cp -f "$src" "$dest/nvpair.png"
+  done
+  if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q -t -f "$ICON_ROOT" >/dev/null 2>&1 || true
+  fi
+}
+
+write_state() {
+  mkdir -p "$STATE_DIR"
+  jq -n \
+    --arg pairVersion "$1" \
+    --arg tag "$2" \
+    --arg arch "$3" \
+    --arg installRoot "$INSTALL_ROOT" \
+    --arg source "$4" \
+    --arg pluginId "$PLUGIN_ID" \
+    --arg pluginVersion "$PLUGIN_VERSION" \
+    '{
+      pairVersion: $pairVersion,
+      tag: $tag,
+      arch: $arch,
+      installRoot: $installRoot,
+      source: $source,
+      installedAt: (now|todateiso8601),
+      pluginId: $pluginId,
+      pluginVersion: $pluginVersion
+    }' >"$STATE_FILE"
+}
+
+read_version_file() {
+  if [[ -f $INSTALL_ROOT/.omarchy-pair-version ]]; then
+    tr -d '[:space:]' <"$INSTALL_ROOT/.omarchy-pair-version"
+  fi
+}
+
+adopt_existing() {
+  pair_binary_present || return 1
+  local ver
+  ver=$(read_version_file)
+  [[ -n $ver ]] || ver="unknown"
+  if [[ -f $STATE_FILE ]]; then
+    local stored
+    stored=$(jq -r '.pairVersion // empty' "$STATE_FILE" 2>/dev/null || true)
+    if [[ -n $stored && $stored != unknown ]]; then
+      write_wrappers
+      return 0
+    fi
+    if [[ $ver == unknown ]]; then
+      write_wrappers
+      return 0
+    fi
+  fi
+  write_state "$ver" "v$ver" "$(arch_deb)" "adopted-existing"
+  write_wrappers
+  log "adopted existing PAIR at $INSTALL_ROOT (version $ver)"
+}
+
+cmd_install() {
+  need_cmd curl
+  need_cmd jq
+  need_cmd ar
+  need_cmd tar
+  local requested=""
+  while (( $# > 0 )); do
+    case "$1" in
+      --version)
+        requested="${2:-}"
+        [[ -n $requested ]] || die "--version needs a tag such as v0.1.1"
+        shift 2
+        ;;
+      *) die "unknown install option: $1" ;;
+    esac
+  done
+
+  local arch tag version name url
+  arch=$(arch_deb)
+  if [[ -n $requested ]]; then
+    tag="$requested"
+    [[ $tag == v* ]] || tag="v$tag"
+    version="${tag#v}"
+    name="NVPAIR-Setup-${version}-${arch}.deb"
+    url="https://github.com/${UPSTREAM_REPO}/releases/download/${tag}/${name}"
+  else
+    fetch_latest 1 || die "could not reach GitHub releases for $UPSTREAM_REPO"
+    tag=$(jq -r '.tag' "$LATEST_CACHE")
+    version=$(jq -r '.version' "$LATEST_CACHE")
+    name=$(jq -r '.name' "$LATEST_CACHE")
+    url=$(jq -r '.debUrl' "$LATEST_CACHE")
+  fi
+
+  local current
+  current=$(installed_version)
+  if pair_binary_present && [[ -n $current && $current == "$version" ]]; then
+    write_wrappers
+    log "PAIR $version is already installed"
+    emit_status 1
+    return 0
+  fi
+
+  if pair_running; then
+    log "stopping running PAIR so the files can be replaced"
+    cmd_stop >/dev/null || true
+    sleep 1
+  fi
+
+  mkdir -p "$STATE_DIR"
+  local tmp
+  tmp=$(mktemp -d "$STATE_DIR/download.XXXXXX")
+  trap 'rm -rf "$tmp"' RETURN
+
+  local deb="$tmp/$name"
+  log "downloading $name"
+  curl -fL -sS -A "$USER_AGENT" --max-time 600 -o "$deb" "$url" \
+    || die "download failed: $url"
+
+  log "extracting Debian package (Omarchy cannot apt-install this)"
+  mkdir -p "$tmp/extract"
+  (cd "$tmp" && ar x "$deb")
+  local data
+  data=$(ls "$tmp"/data.tar.* | head -n1)
+  [[ -n $data ]] || die "deb has no data.tar.*"
+  tar -xf "$data" -C "$tmp/extract"
+
+  [[ -x $tmp/extract/opt/PAIR/nvpair ]] || die "package did not contain /opt/PAIR/nvpair"
+
+  log "installing into $INSTALL_ROOT"
+  mkdir -p "$(dirname "$INSTALL_ROOT")"
+  rm -rf "$INSTALL_ROOT"
+  mv "$tmp/extract/opt/PAIR" "$INSTALL_ROOT"
+  printf '%s\n' "$version" >"$INSTALL_ROOT/.omarchy-pair-version"
+  install_icons_from "$tmp/extract"
+  write_wrappers
+  write_state "$version" "$tag" "$arch" "$url"
+  log "installed NVIDIA PAIR $version"
+  emit_status 1
+}
+
+cmd_update() {
+  adopt_existing || true
+  fetch_latest 1 || die "could not reach GitHub releases for $UPSTREAM_REPO"
+  local latest current
+  latest=$(jq -r '.version' "$LATEST_CACHE")
+  current=$(installed_version)
+  if pair_binary_present && [[ -n $current && $current == "$latest" ]]; then
+    log "PAIR $current is already the latest GitHub release"
+    emit_status 1
+    return 0
+  fi
+  log "updating NVIDIA PAIR ${current:-none} -> $latest"
+  cmd_install
+}
+
+cmd_uninstall() {
+  local purge=0
+  if [[ ${1:-} == --purge ]]; then
+    purge=1
+  elif [[ -n ${1:-} ]]; then
+    die "unknown uninstall option: $1"
+  fi
+  if pair_running; then
+    cmd_stop >/dev/null || true
+    sleep 1
+  fi
+  rm -rf "$INSTALL_ROOT"
+  rm -f "$BIN_DIR/nvpair" "$BIN_DIR/nvpair-desktop" "$DESKTOP_DIR/nvpair.desktop"
+  local sz
+  for sz in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
+    rm -f "$ICON_ROOT/$sz/apps/nvpair.png"
+  done
+  rm -f "$STATE_FILE"
+  if ((purge)); then
+    log "purging PAIR cluster data (models in ~/.ollama are left alone)"
+    rm -rf "$HOME/.config/Nvidia Corporation/Personal AI Router"
+    rm -rf "$HOME/.config/NVIDIA Corporation/PAIR"
+    rmdir "$HOME/.config/Nvidia Corporation" 2>/dev/null || true
+    rmdir "$HOME/.config/NVIDIA Corporation" 2>/dev/null || true
+  fi
+  log "removed NVIDIA PAIR"
+  emit_status 1
+}
+
+cmd_launch() {
+  adopt_existing || true
+  pair_binary_present || die "PAIR is not installed. Run: pair-ctl install"
+  if pair_running; then
+    if command -v hyprctl >/dev/null 2>&1; then
+      hyprctl dispatch focuswindow class:nvpair >/dev/null 2>&1 || true
+    fi
+    log "PAIR is already running"
+    emit_status 1
+    return 0
+  fi
+  nohup "$BIN_DIR/nvpair-desktop" >/dev/null 2>&1 &
+  disown || true
+  log "launched PAIR desktop"
+  emit_status 1
+}
+
+cmd_stop() {
+  if [[ -x $BIN_DIR/nvpair-desktop ]]; then
+    "$BIN_DIR/nvpair-desktop" --exit-application >/dev/null 2>&1 || true
+  fi
+  pkill -f "$HOME/.local/opt/PAIR/nvpair" >/dev/null 2>&1 || true
+  emit_status 0
+}
+
+emit_json() {
+  # $1 = include latest lookup (0/1), $2 optional error message
+  local check_latest="${1:-0}"
+  local error="${2:-}"
+  adopt_existing >/dev/null 2>&1 || true
+  local installed=false running=false gpu=false
+  pair_binary_present && installed=true
+  pair_running && running=true
+  has_nvidia_gpu && gpu=true
+  local current latest update=false
+  current=$(installed_version)
+  [[ -n $current ]] || current=""
+  if ((check_latest)); then
+    if fetch_latest 0; then
+      latest=$(jq -r '.version // empty' "$LATEST_CACHE" 2>/dev/null || true)
+    fi
+  elif [[ -f $LATEST_CACHE ]]; then
+    latest=$(jq -r '.version // empty' "$LATEST_CACHE" 2>/dev/null || true)
+  fi
+  latest="${latest:-}"
+  if [[ $installed == true && -n $latest && -n $current && $current != unknown ]] && version_gt "$current" "$latest"; then
+    update=true
+  elif [[ $installed == true && -n $latest && ( -z $current || $current == unknown ) ]]; then
+    update=true
+  fi
+
+  local gpu_note=""
+  if [[ $gpu != true ]]; then
+    gpu_note="No NVIDIA GPU detected. PAIR can still run here and route work to other machines that have one."
+  fi
+
+  local message
+  if [[ -n $error ]]; then
+    message="$error"
+  elif [[ $installed != true ]]; then
+    message="NVIDIA PAIR is not installed yet. Install it from this panel, or run scripts/pair-ctl install."
+  elif [[ $update == true ]]; then
+    message="PAIR ${current:-unknown} is installed. GitHub has $latest — update the app with pair-ctl update, not the in-app updater."
+  elif [[ $running == true ]]; then
+    message="PAIR ${current:-} is installed and running."
+  else
+    message="PAIR ${current:-} is installed. Launch it to start the local endpoints."
+  fi
+
+  jq -n \
+    --argjson ok "$([[ -z $error ]] && echo true || echo false)" \
+    --arg error "$error" \
+    --arg pluginId "$PLUGIN_ID" \
+    --arg pluginVersion "$PLUGIN_VERSION" \
+    --argjson installed "$installed" \
+    --argjson running "$running" \
+    --arg pairVersion "${current}" \
+    --arg latestVersion "${latest}" \
+    --argjson updateAvailable "$update" \
+    --arg arch "$(arch_deb)" \
+    --arg installRoot "$INSTALL_ROOT" \
+    --argjson hasNvidiaGpu "$gpu" \
+    --arg gpuNote "$gpu_note" \
+    --arg message "$message" \
+    --arg ollama "http://127.0.0.1:11434" \
+    --arg openai "http://127.0.0.1:1234" \
+    --arg desktop "$BIN_DIR/nvpair-desktop" \
+    --arg tui "$BIN_DIR/nvpair" \
+    '{
+      ok: $ok,
+      error: $error,
+      pluginId: $pluginId,
+      pluginVersion: $pluginVersion,
+      installed: $installed,
+      running: $running,
+      pairVersion: $pairVersion,
+      latestVersion: $latestVersion,
+      updateAvailable: $updateAvailable,
+      arch: $arch,
+      installRoot: $installRoot,
+      hasNvidiaGpu: $hasNvidiaGpu,
+      gpuNote: $gpuNote,
+      message: $message,
+      endpoints: {ollama: $ollama, openai: $openai},
+      commands: {desktop: $desktop, tui: $tui}
+    }'
+}
+
+emit_status() {
+  emit_json "$1"
+}
+
+cmd_status() {
+  local check=0
+  if [[ ${1:-} == --check-latest ]]; then
+    check=1
+  elif [[ -n ${1:-} ]]; then
+    die "unknown status option: $1"
+  fi
+  emit_json "$check"
+}
+
+main() {
+  local cmd="${1:-}"
+  shift || true
+  case "$cmd" in
+    status) cmd_status "$@" ;;
+    install) cmd_install "$@" ;;
+    update) cmd_update "$@" ;;
+    uninstall) cmd_uninstall "$@" ;;
+    launch) cmd_launch "$@" ;;
+    stop) cmd_stop "$@" ;;
+    -h | --help | help | "") usage ;;
+    *) die "unknown command: $cmd" ;;
+  esac
+}
+
+main "$@"
