@@ -32,9 +32,11 @@ The first download is about 135 MB.
 
 ## Usage
 
+Once NVIDIA PAIR is running, this helper **hides**. The remaining PAIR icon in the top bar is NVIDIA’s official tray icon (via Omarchy’s system tray). The helper is only for install, updates, and firewall ports.
+
 | Action | What it does |
 | --- | --- |
-| Left click | Open the panel |
+| Left click | Open the helper panel |
 | Right-click the icon | Install PAIR, or launch it if it is already installed |
 | Middle-click the icon | Check GitHub for a newer PAIR app, or update it |
 | **Install NVIDIA PAIR** | Download the latest NVIDIA release and unpack it into `~/.local/opt/PAIR` |
@@ -121,6 +123,10 @@ Local inference still needs Ollama or LM Studio plus a model, and enough memory 
 ## Known issues
 
 These are pairing problems, not missing models. PAIR does **not** need a local LLM to add a node.
+
+### Two PAIR icons in the top bar
+
+NVIDIA PAIR creates a **tray** icon. This plugin also adds a **helper** chip. They are not two copies of PAIR. The dim/broken-looking chip is the helper. It now hides while PAIR is running so only the official tray remains.
 
 ### Linux never shows a PIN when another PC adds this node
 

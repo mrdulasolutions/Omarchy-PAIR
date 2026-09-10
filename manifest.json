@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.mrdulasolutions.pair",
   "name": "NVIDIA PAIR",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "author": "MR Dula Solutions",
   "license": "MIT",
   "description": "Install, update, and launch NVIDIA Personal AI Router (PAIR) on Omarchy.",
@@ -13,8 +13,8 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "NVIDIA PAIR",
-    "description": "Install and update NVIDIA PAIR, then launch the local AI router",
+    "displayName": "PAIR helper",
+    "description": "Install, update, and open PAIR firewall ports. Hides while NVIDIA PAIR is running (use the official tray icon).",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "right"
