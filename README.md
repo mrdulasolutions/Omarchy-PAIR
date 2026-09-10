@@ -4,13 +4,15 @@ Install, update, and launch [NVIDIA Personal AI Router (PAIR)](https://github.co
 
 PAIR is **not** NIM, Nemo, or a new inference engine. It is a local router that sits in front of Ollama or LM Studio and can send independent requests to other PAIR nodes on your LAN.
 
-Omarchy is Arch-based. NVIDIA only ships a `.deb`. This plugin extracts that package into `~/.local` so you never need `apt` or `sudo`.
+Omarchy is Arch-based. NVIDIA only ships a `.deb`. This plugin extracts that package into `~/.local`. Installing PAIR itself needs no `sudo`. Opening PAIR LAN ports in `ufw` does.
 
-![NVIDIA PAIR panel](preview.png)
+![PAIR chip on the Omarchy bar](bar.png)
 
-A live cluster after pairing Omarchy (Linux) with a Mac:
+![NVIDIA PAIR helper panel](preview.png)
 
-![PAIR cluster with Omarchy and Mac](pair-cluster.png)
+A live cluster after pairing Omarchy (Linux) with another machine:
+
+![PAIR cluster with Omarchy and a Mac](pair-cluster.png)
 
 ## Install the plugin
 
@@ -20,7 +22,7 @@ omarchy plugin add https://github.com/mrdulasolutions/Omarchy-PAIR.git --enable
 
 That clones into
 `~/.config/omarchy/plugins/io.github.mrdulasolutions.pair/`
-and places a GPU-card icon on the right side of the bar.
+and places the official PAIR icon on the right side of the bar.
 
 **Adding the plugin does not download PAIR.** Omarchy never runs plugin install hooks. Open the panel and click **Install NVIDIA PAIR**, or:
 
@@ -129,7 +131,7 @@ These are pairing problems, not missing models. PAIR does **not** need a local L
 
 ### Two PAIR icons in the top bar
 
-NVIDIA PAIR’s Electron tray icon is unusable on Omarchy: its popup closes when you move off the top bar. This plugin hides that tray entry (`pair-ctl hide-tray`) and is the single PAIR chip. Left-click opens the app; right-click opens install/update/firewall.
+NVIDIA PAIR’s Electron tray icon is unusable on Omarchy: its popup closes when you move off the top bar. Opening this plugin’s chip or helper adds NVIDIA’s tray id to `omarchy.tray.hidden` in `shell.json` so only this chip remains. That write happens on your click, not when the plugin loads.
 
 ### Linux never shows a PIN when another PC adds this node
 
@@ -164,7 +166,7 @@ Clicking **Add node** on a machine **creates a new cluster** with only itself in
 
 ### Wrong IP / DHCP
 
-Addresses move. Prefer the discovered name (`MRDulas-MacBook-Pro`, `omarchy`) over a typed IP. Confirm with `ip neigh` / ping before retrying a stale address.
+Addresses move. Prefer the discovered hostname (`macbook.local`, `omarchy`) over a typed IP. Confirm with `ip neigh` / ping before retrying a stale address.
 
 ### Pairing is not an LLM problem
 
@@ -190,7 +192,9 @@ Remove the plugin (bar icon and installer):
 omarchy plugin remove io.github.mrdulasolutions.pair
 ```
 
-That does **not** uninstall NVIDIA PAIR. Remove the app with:
+That does **not** uninstall NVIDIA PAIR, does **not** delete ufw rules, and does
+**not** un-hide the NVIDIA tray entry in `~/.config/omarchy/shell.json`.
+Remove the app with:
 
 ```sh
 ~/.config/omarchy/plugins/io.github.mrdulasolutions.pair/scripts/pair-ctl uninstall
@@ -199,6 +203,7 @@ That does **not** uninstall NVIDIA PAIR. Remove the app with:
 Add `--purge` to also delete PAIR cluster identity and settings under
 `~/.config/Nvidia Corporation/Personal AI Router`.
 Model weights in `~/.ollama` / `~/.lmstudio` are never deleted.
+ufw comments `NVIDIA PAIR` can be deleted with `sudo ufw status numbered` if you want the ports closed again.
 
 If you already removed the plugin, delete the app by hand:
 
@@ -233,18 +238,19 @@ omarchy-shell shell summon io.github.mrdulasolutions.pair '{}'
 | `nvpair.png` | Official NVIDIA PAIR icon used in the bar |
 | `Model.js` | Status JSON helpers |
 | `scripts/pair-ctl` | Install / update / launch NVIDIA PAIR |
-| `AGENTS.md` | Instructions for coding agents |
+| `bar.png` | Top-bar screenshot |
+| `NOTICE` | NVIDIA PAIR icon attribution |
 
 ## Marketplace listing
 
-The repo is a normal Omarchy plugin: `manifest.json` at the root, `omarchy plugin validate` passes, MIT license, install/remove in this README, no symlinks, id `io.github.mrdulasolutions.pair`.
+The repo is a normal Omarchy plugin: `manifest.json` at the root, `omarchy plugin validate` passes, MIT license, install/remove in this README, id `io.github.mrdulasolutions.pair`.
 
 List it from the [plugin submit form](https://github.com/omacom/omarchy-plugin-marketplace/issues/new?template=submit-plugin.yml):
 
 - Repository: `https://github.com/mrdulasolutions/Omarchy-PAIR.git`
-- Category: **System** (or Developer Tools)
+- Category: **System**
 - Tags (max three): **AI**, **Bar**, **System**
-- Notes: downloads NVIDIA PAIR from GitHub into `~/.local`; `pair-ctl firewall` needs sudo to open ufw LAN ports; does not overwrite Hyprland or shell config.
+- Notes: user-local installer for NVIDIA PAIR from GitHub (`~/.local/opt/PAIR`). `pair-ctl firewall` is the only sudo path (visible terminal, LAN PAIR ports). Hiding NVIDIA’s tray icon writes `omarchy.tray.hidden` in `shell.json` only after you click the chip or open the panel. Does not edit Hyprland config. `nvpair.png` is NVIDIA’s app icon (see NOTICE).
 
 ## License
 

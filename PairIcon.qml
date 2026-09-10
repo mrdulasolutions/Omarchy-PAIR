@@ -27,6 +27,7 @@ Item {
   }
 
   Text {
+    textFormat: Text.PlainText
     anchors.centerIn: parent
     visible: mark.status !== Image.Ready
     text: "󰢮"

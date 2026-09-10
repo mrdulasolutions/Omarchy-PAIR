@@ -127,21 +127,20 @@ BarWidget {
     var gpu = jsonField(t, "gpuNote")
     var ollama = jsonField(t, "ollama")
     var openai = jsonField(t, "openai")
-    if (version !== "") root.pairVersion = version
-    if (latest !== "") root.pairLatest = latest
-    if (gpu !== "") root.pairGpuNote = gpu
+    if (version !== "") root.pairVersion = Model.plain(version, 32)
+    if (latest !== "") root.pairLatest = Model.plain(latest, 32)
+    if (gpu !== "") root.pairGpuNote = Model.plain(gpu, 200)
     if (ollama.indexOf("http") === 0) root.pairOllama = ollama
     if (openai.indexOf("http") === 0) root.pairOpenai = openai
     if (t.indexOf('"updateAvailable": true') !== -1) root.pairUpdateAvailable = true
     if (t.indexOf('"updateAvailable": false') !== -1) root.pairUpdateAvailable = false
     if (t.indexOf('"firewallBlocked": true') !== -1) root.pairFirewallBlocked = true
     if (t.indexOf('"firewallBlocked": false') !== -1) root.pairFirewallBlocked = false
-    if (message !== "") root.pairMessage = message
+    if (message !== "") root.pairMessage = Model.plain(message, 240)
     else if (running) root.pairMessage = "PAIR is running. Left-click the chip to focus it."
     else if (installed) root.pairMessage = "PAIR is installed. Left-click the chip to launch it."
     if (running) {
       if (root.lastError.indexOf("Could not read PAIR status") === 0) root.lastError = ""
-      if (!root.trayHidden) root.hideTray()
     }
   }
 
@@ -182,16 +181,9 @@ BarWidget {
     if (!hideTrayProc.running) hideTrayProc.running = true
   }
 
-  function runDetached(command) {
-    if (root.bar && typeof root.bar.run === "function") root.bar.run(command)
-    else Quickshell.execDetached(["bash", "-lc", command])
-  }
-
   function launchPair() {
     if (root.pairRunning) {
-      // Same job as NVIDIA's tray click: focus the live window, or poke
-      // the desktop wrapper so Electron maps it again.
-      root.runDetached('omarchy-hyprland-focus-app nvpair || "$HOME/.local/bin/nvpair-desktop"')
+      Quickshell.execDetached(["/usr/bin/omarchy-hyprland-focus-app", "nvpair"])
       root.hideTray()
       return
     }
@@ -199,7 +191,8 @@ BarWidget {
       root.togglePanel()
       return
     }
-    root.runDetached('"$HOME/.local/bin/nvpair-desktop" || "$HOME/.local/opt/PAIR/nvpair" --ozone-platform-hint=auto')
+    var desktop = root.homeDir + "/.local/bin/nvpair-desktop"
+    Quickshell.execDetached([desktop])
     root.pairRunning = true
     root.pairMessage = "PAIR is running. Left-click the chip to focus it."
     Qt.callLater(function() {
@@ -258,8 +251,8 @@ BarWidget {
   }
 
   function notify(headline, body, urgency) {
-    var args = ["omarchy-notification-send", "-g", root.pairIcon, "-u", urgency || "low", "--app-name", "NVIDIA PAIR", headline]
-    if (body && body !== "") args.push(body)
+    var args = ["/usr/bin/omarchy-notification-send", "-g", root.pairIcon, "-u", urgency || "low", "--app-name", "NVIDIA PAIR", Model.plain(headline, 80)]
+    if (body && body !== "") args.push(Model.plain(body, 200))
     Quickshell.execDetached(args)
   }
 
@@ -267,14 +260,13 @@ BarWidget {
   onSettingsChanged: injectPanel()
   Component.onCompleted: {
     root.probe()
-    root.hideTray()
     root.refresh(false)
     root.refreshCluster()
   }
 
   Process {
     id: probeProc
-    command: ["/usr/bin/bash", "-c", "HOME=\"${HOME:-$(getent passwd \"$(id -u)\" | cut -d: -f6)}\"; if /usr/bin/pgrep -x nvpair >/dev/null; then printf 'RUNNING\\n'; elif /usr/bin/test -x \"$HOME/.local/opt/PAIR/nvpair\" || /usr/bin/test -x \"$HOME/.local/bin/nvpair-desktop\"; then printf 'INSTALLED\\n'; else printf 'MISSING\\n'; fi; if /usr/bin/test -f \"$HOME/.local/state/omarchy-pair/status.json\"; then /usr/bin/cat \"$HOME/.local/state/omarchy-pair/status.json\"; fi"]
+    command: ["/usr/bin/bash", "-c", "HOME=\"${HOME:-$(getent passwd \"$(id -u)\" | cut -d: -f6)}\"; if /usr/bin/pgrep -x nvpair >/dev/null; then printf 'RUNNING\\n'; elif /usr/bin/test -x \"$HOME/.local/opt/PAIR/nvpair\" || /usr/bin/test -x \"$HOME/.local/bin/nvpair-desktop\"; then printf 'INSTALLED\\n'; else printf 'MISSING\\n'; fi; if /usr/bin/test -f \"$HOME/.local/state/omarchy-pair/status.json\"; then /usr/bin/head -c 8192 \"$HOME/.local/state/omarchy-pair/status.json\"; fi"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.applyProbe(text)
@@ -317,7 +309,6 @@ BarWidget {
       }
     }
     onExited: function(exitCode) {
-      statusFile.reload()
       if (exitCode !== 0 && root.lastError === "" && !root.pairReady)
         root.lastError = "Could not read PAIR status (exit " + exitCode + ")."
     }
@@ -326,15 +317,11 @@ BarWidget {
   FileView {
     id: statusFile
     path: root.statusPath
-    preload: true
+    preload: false
     watchChanges: true
+    blockAllReads: true
     printErrors: false
-    onFileChanged: reload()
-    onLoaded: {
-      var body = ""
-      try { body = text() } catch (e) { body = "" }
-      if (body && String(body).trim() !== "") root.applyStatus(body)
-    }
+    onFileChanged: root.probe()
   }
 
   Process {
@@ -349,7 +336,7 @@ BarWidget {
     }
     stderr: SplitParser {
       onRead: function(line) {
-        var text = String(line || "").trim()
+        var text = Model.plain(line, 200)
         if (text !== "") root.progressText = text
       }
     }
@@ -399,11 +386,8 @@ BarWidget {
   IpcHandler {
     target: "io.github.mrdulasolutions.pair"
 
-    function refresh(): void { root.refresh(true) }
-    function install(): void { root.runCtl(["install"]) }
-    function update(): void { root.runUpdate() }
+    function refresh(): void { root.refresh(false) }
     function launch(): void { root.launchPair() }
-    function firewall(): void { root.runCtl(["firewall"]) }
     function open(): void { root.open() }
     function close(): void { root.close() }
     function show(): void { root.open() }

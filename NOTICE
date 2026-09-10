@@ -1,0 +1,11 @@
+NVIDIA PAIR icon
+================
+
+`nvpair.png` is the application icon from NVIDIA Personal AI Router
+(https://github.com/NVIDIA/Personal-AI-Router), Apache-2.0.
+
+This plugin redistributes that icon only to identify the PAIR app on the
+Omarchy bar. NVIDIA PAIR itself is a separate project; this plugin does
+not claim NVIDIA trademarks beyond nominative use.
+
+The plugin code in this repository is MIT (see LICENSE).

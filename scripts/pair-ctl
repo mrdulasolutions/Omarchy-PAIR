@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 # SPDX-FileCopyrightText: Copyright (c) 2026 MR Dula Solutions
 # SPDX-License-Identifier: MIT
 #
@@ -17,7 +17,7 @@ fi
 { printf '%s %s\n' "$(date -Is)" "$*"; } >>"${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair/ctl.log" 2>/dev/null || true
 
 PLUGIN_ID="io.github.mrdulasolutions.pair"
-PLUGIN_VERSION="1.2.4"
+PLUGIN_VERSION="0.0.1"
 UPSTREAM_REPO="NVIDIA/Personal-AI-Router"
 INSTALL_ROOT="${PAIR_HOME:-$HOME/.local/opt/PAIR}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair"
@@ -109,10 +109,13 @@ fetch_latest() {
   fi
   mkdir -p "$STATE_DIR"
   local json
-  json=$(curl -fsSL -A "$USER_AGENT" --max-time 20 "$API_URL") || {
+  json=$(/usr/bin/curl -q --fail -sS --proto =https --proto-redir =https \
+    -A "$USER_AGENT" --max-time 20 --max-filesize 1048576 -- "$API_URL" \
+    | /usr/bin/head -c 1048577) || {
     log "could not reach GitHub releases for $UPSTREAM_REPO"
     return 1
   }
+  [[ ${#json} -le 1048576 ]] || { log "GitHub release metadata exceeded size cap"; return 1; }
   local arch tag version name url
   arch=$(arch_deb)
   tag=$(jq -r '.tag_name // empty' <<<"$json")
@@ -301,7 +304,8 @@ cmd_install() {
 
   local deb="$tmp/$name"
   log "downloading $name"
-  curl -fL -sS -A "$USER_AGENT" --max-time 600 -o "$deb" "$url" \
+  /usr/bin/curl -q --fail -sS -L --proto =https --proto-redir =https \
+    -A "$USER_AGENT" --max-time 600 --max-filesize 209715200 -o "$deb" -- "$url" \
     || die "download failed: $url"
 
   log "extracting Debian package (Omarchy cannot apt-install this)"
@@ -421,13 +425,14 @@ cmd_hide_tray() {
     return 0
   }
   python3 - "$ids" <<'PY'
-import json, os, sys
+import json, os, sys, tempfile
 from pathlib import Path
-new_ids = [line for line in sys.argv[1].splitlines() if line.strip()]
+
+new_ids = [line for line in sys.argv[1].splitlines() if line.strip()][:8]
 p = Path.home() / ".config/omarchy/shell.json"
-if not p.exists():
+if not p.is_file() or p.is_symlink() or p.stat().st_size > 1_000_000:
     sys.exit(0)
-d = json.loads(p.read_text())
+d = json.loads(p.read_text(encoding="utf-8"))
 changed = False
 for section in d.get("bar", {}).get("layout", {}).values():
     if not isinstance(section, list):
@@ -447,8 +452,26 @@ for section in d.get("bar", {}).get("layout", {}).values():
                 hidden.append(item)
                 changed = True
         entry["hidden"] = hidden
-if changed:
-    p.write_text(json.dumps(d, indent=2) + "\n")
+if not changed:
+    sys.exit(0)
+fd, tmp = tempfile.mkstemp(prefix=".shell.", suffix=".tmp", dir=str(p.parent))
+try:
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(d, fh, indent=2)
+        fh.write("\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+        fd = None
+    os.replace(tmp, p)
+except Exception:
+    if fd is not None:
+        os.close(fd)
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    raise
 PY
   log "hid NVIDIA PAIR tray icon(s): $(printf '%s' "$ids" | tr '\n' ' ')"
   emit_status 0
@@ -686,7 +709,11 @@ import json, sys, urllib.request
 
 members_path, local_uuid, lan = sys.argv[1], sys.argv[2], sys.argv[3]
 try:
-    members = json.loads(open(members_path, encoding="utf-8").read())
+    raw = open(members_path, encoding="utf-8").read(65537)
+    if len(raw) > 65536:
+        print("[]")
+        raise SystemExit(0)
+    members = json.loads(raw)
 except Exception:
     print("[]")
     raise SystemExit(0)
@@ -709,7 +736,10 @@ for member in members:
     if probe_ip:
         try:
             with urllib.request.urlopen(f"http://{probe_ip}:14318/v1/node-info", timeout=0.5) as resp:
-                data = json.loads(resp.read().decode())
+                body = resp.read(8193)
+                if len(body) > 8192:
+                    raise ValueError("node-info too large")
+                data = json.loads(body.decode())
             online = True
             gpus = data.get("GPUs") or []
             if gpus and isinstance(gpus[0], dict):

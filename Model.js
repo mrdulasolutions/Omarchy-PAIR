@@ -1,9 +1,17 @@
+function plain(value, maxLen) {
+  var s = String(value || "")
+  s = s.replace(/[<>&]/g, "").replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
+  var n = maxLen || 200
+  if (s.length > n) s = s.slice(0, n)
+  return s.trim()
+}
+
 function emptyStatus() {
   return {
     ok: true,
     error: "",
     pluginId: "io.github.mrdulasolutions.pair",
-    pluginVersion: "1.2.4",
+    pluginVersion: "0.0.1",
     installed: false,
     running: false,
     pairVersion: "",
@@ -91,14 +99,15 @@ function parseNodes(text) {
     var data = JSON.parse(raw.slice(start, end + 1))
     if (!data || typeof data.length !== "number") return []
     var nodes = []
-    for (var i = 0; i < data.length; i++) {
+    var limit = data.length > 16 ? 16 : data.length
+    for (var i = 0; i < limit; i++) {
       var row = data[i]
       if (!row || typeof row !== "object") continue
       nodes.push({
-        name: String(row.name || row.id || "node"),
-        ip: String(row.ip || row.ipAddress || ""),
-        uuid: String(row.uuid || row.nodeUuid || ""),
-        gpu: String(row.gpu || ""),
+        name: plain(row.name || row.id || "node", 64),
+        ip: plain(row.ip || row.ipAddress || "", 48),
+        uuid: plain(row.uuid || row.nodeUuid || "", 64),
+        gpu: plain(row.gpu || "", 80),
         local: row.local === true,
         online: row.online === true
       })

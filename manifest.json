@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.mrdulasolutions.pair",
   "name": "NVIDIA PAIR",
-  "version": "1.2.4",
+  "version": "0.0.1",
   "author": "MR Dula Solutions",
   "license": "MIT",
   "description": "Install, update, and launch NVIDIA Personal AI Router (PAIR) on Omarchy.",

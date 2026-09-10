@@ -52,6 +52,7 @@ Panel {
     if (host && typeof host.refresh === "function") host.refresh(true)
     if (host && typeof host.probe === "function") host.probe()
     if (host && typeof host.refreshCluster === "function") host.refreshCluster()
+    if (host && typeof host.hideTray === "function") host.hideTray()
   }
 
   function close() {
@@ -150,6 +151,7 @@ Panel {
               border.color: root.healthColor
 
               Text {
+                textFormat: Text.PlainText
                 id: healthText
                 anchors.centerIn: parent
                 text: root.healthLabel
@@ -163,6 +165,7 @@ Panel {
         }
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           text: root.statusText
           color: root.lastError !== "" ? root.contentUrgent : root.healthColor
@@ -172,6 +175,7 @@ Panel {
         }
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           visible: root.pairGpuNote !== "" && root.pairNodes.length === 0
           text: root.pairGpuNote
@@ -187,6 +191,7 @@ Panel {
           spacing: Style.space(8)
 
           Text {
+            textFormat: Text.PlainText
             text: "CLUSTER"
             color: Qt.darker(root.contentForeground, 1.45)
             font.family: root.contentFontFamily
@@ -210,6 +215,7 @@ Panel {
                 spacing: Style.space(8)
 
                 Text {
+                  textFormat: Text.PlainText
                   text: Model.nodeTitle(nodeBlock.node)
                   color: root.contentForeground
                   font.family: root.contentFontFamily
@@ -220,6 +226,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   id: badge
                   text: Model.nodeMeta(nodeBlock.node)
                   color: Model.nodeMetaColor(nodeBlock.node, "#3ea072", "#d4a017", root.contentUrgent)
@@ -231,6 +238,7 @@ Panel {
               }
 
               Text {
+                textFormat: Text.PlainText
                 width: parent.width
                 visible: Model.nodeDetail(nodeBlock.node) !== ""
                 text: Model.nodeDetail(nodeBlock.node)
@@ -244,6 +252,7 @@ Panel {
         }
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           visible: root.pairReady && root.pairNodes.length === 0
           text: "No cluster members yet. Open PAIR and add a node with the PIN."
@@ -259,6 +268,7 @@ Panel {
           spacing: Style.space(4)
 
           Text {
+            textFormat: Text.PlainText
             text: "LOCAL ENDPOINTS"
             color: Qt.darker(root.contentForeground, 1.45)
             font.family: root.contentFontFamily
@@ -268,6 +278,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             text: "Ollama  " + root.pairOllama
             color: root.contentForeground
@@ -277,6 +288,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             text: "OpenAI  " + root.pairOpenai
             color: root.contentForeground
@@ -371,6 +383,7 @@ Panel {
           spacing: Style.space(6)
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             text: "Omarchy ufw drops inbound PAIR. If another PC never shows a PIN on this machine, or pairing closes with “already in another cluster”, allow LAN TCP 14318–14323 and UDP 5353."
             color: Qt.darker(root.contentForeground, 1.4)
@@ -380,6 +393,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             text: "Leave cluster on both machines first. Keep one PIN open until the peer appears. Pairing does not need a local LLM."
             color: Qt.darker(root.contentForeground, 1.4)
