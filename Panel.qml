@@ -35,7 +35,6 @@ Panel {
   property bool cursorActive: false
   property bool busy: actionProc.running
   property bool pairProcessAlive: false
-  readonly property bool hideChip: pairProcessAlive && !root.opened && !busy
 
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
   readonly property color contentUrgent: bar && bar.urgent ? bar.urgent : Color.urgent
@@ -47,9 +46,9 @@ Panel {
   readonly property string tooltipText: {
     if (busy) return "NVIDIA PAIR — " + (progressText !== "" ? progressText : "working")
     if (pairUpdateAvailable) return "NVIDIA PAIR — update " + pairLatest + " available"
-    if (pairProcessAlive || pairRunning) return "PAIR helper — NVIDIA tray is the official app icon"
-    if (pairInstalled) return "PAIR helper — launch NVIDIA PAIR"
-    return "PAIR helper — install NVIDIA PAIR"
+    if (pairProcessAlive || pairRunning) return "PAIR — open app (right-click for helper)"
+    if (pairInstalled) return "PAIR — launch NVIDIA PAIR"
+    return "PAIR — install NVIDIA PAIR"
   }
   readonly property string statusText: {
     if (busy && progressText !== "") return progressText
@@ -57,9 +56,8 @@ Panel {
     return pairMessage
   }
 
-  implicitWidth: hideChip ? 0 : button.implicitWidth
-  implicitHeight: hideChip ? 0 : button.implicitHeight
-  visible: !hideChip
+  implicitWidth: button.implicitWidth
+  implicitHeight: button.implicitHeight
 
   function open() {
     root.controller.show()
@@ -164,11 +162,12 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     text: root.pairIcon
-    dimmed: !root.pairInstalled || root.busy
+    dimmed: root.busy || (!root.pairProcessAlive && !root.pairInstalled)
     tooltipText: root.tooltipText
     onPressed: function(b) {
-      if (b === Qt.RightButton) root.runPrimary()
+      if (b === Qt.RightButton) root.toggle()
       else if (b === Qt.MiddleButton) root.runUpdate()
+      else if (root.pairProcessAlive || root.pairInstalled) root.runCtl(["launch"])
       else root.toggle()
     }
   }
@@ -253,13 +252,21 @@ Panel {
     running: true
     repeat: true
     triggeredOnStart: true
-    onTriggered: if (!aliveProc.running) aliveProc.running = true
+    onTriggered: {
+      if (!aliveProc.running) aliveProc.running = true
+      if (root.pairProcessAlive && !hideTrayProc.running) hideTrayProc.running = true
+    }
   }
 
   Process {
     id: aliveProc
     command: ["pgrep", "-f", "/.local/opt/PAIR/nvpair"]
     onExited: function(code) { root.pairProcessAlive = (code === 0) }
+  }
+
+  Process {
+    id: hideTrayProc
+    command: ["/usr/bin/bash", root.ctlPath, "hide-tray"]
   }
 
   Component.onCompleted: Qt.callLater(function() {

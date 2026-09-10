@@ -17,7 +17,7 @@ fi
 { printf '%s %s\n' "$(date -Is)" "$*"; } >>"${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair/ctl.log" 2>/dev/null || true
 
 PLUGIN_ID="io.github.mrdulasolutions.pair"
-PLUGIN_VERSION="1.1.2"
+PLUGIN_VERSION="1.2.0"
 UPSTREAM_REPO="NVIDIA/Personal-AI-Router"
 INSTALL_ROOT="${PAIR_HOME:-$HOME/.local/opt/PAIR}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair"
@@ -41,6 +41,7 @@ Usage: pair-ctl <command>
   launch                    Start the PAIR desktop app
   stop                      Ask the PAIR desktop app to quit
   firewall                  Open PAIR LAN ports in ufw (needs sudo)
+  hide-tray                 Hide NVIDIA PAIR's tray icon so only this helper remains
 
 Omarchy is Arch-based. Do not apt-install the NVIDIA .deb.
 Do not use PAIR's in-app updater on Omarchy; it expects Debian.
@@ -368,6 +369,90 @@ cmd_uninstall() {
   emit_status 1
 }
 
+pair_tray_ids() {
+  python3 - <<'PY'
+import re, subprocess
+
+def busctl(*args):
+    return subprocess.check_output(["busctl", "--user", *args], text=True, stderr=subprocess.DEVNULL)
+
+try:
+    raw = busctl("get-property", "org.kde.StatusNotifierWatcher",
+                 "/StatusNotifierWatcher", "org.kde.StatusNotifierWatcher",
+                 "RegisteredStatusNotifierItems")
+except Exception:
+    raise SystemExit(0)
+items = re.findall(r'"([^"]+)"', raw)
+ids = []
+for item in items:
+    if "/" not in item:
+        continue
+    dest, path = item.split("/", 1)
+    path = "/" + path
+    sid = title = tooltip = ""
+    for prop in ("Id", "Title", "IconName"):
+        try:
+            val = busctl("get-property", dest, path, "org.kde.StatusNotifierItem", prop)
+            m = re.search(r'"([^"]*)"', val)
+            if not m:
+                continue
+            if prop == "Id":
+                sid = m.group(1)
+            elif prop == "Title":
+                title = m.group(1)
+        except Exception:
+            pass
+    blob = " ".join([sid, title, item]).lower()
+    if any(k in blob for k in ("pair", "nvpair", "personal ai router")):
+        if sid:
+            ids.append(sid)
+for x in ids:
+    print(x)
+PY
+}
+
+cmd_hide_tray() {
+  local ids
+  ids=$(pair_tray_ids || true)
+  [[ -n $ids ]] || {
+    log "no NVIDIA PAIR tray icon registered"
+    emit_status 0
+    return 0
+  }
+  python3 - "$ids" <<'PY'
+import json, os, sys
+from pathlib import Path
+new_ids = [line for line in sys.argv[1].splitlines() if line.strip()]
+p = Path.home() / ".config/omarchy/shell.json"
+if not p.exists():
+    sys.exit(0)
+d = json.loads(p.read_text())
+changed = False
+for section in d.get("bar", {}).get("layout", {}).values():
+    if not isinstance(section, list):
+        continue
+    for entry in section:
+        if entry.get("id") != "omarchy.tray":
+            continue
+        hidden = entry.get("hidden", [])
+        if isinstance(hidden, str):
+            hidden = [hidden] if hidden else []
+            changed = True
+        if not isinstance(hidden, list):
+            hidden = []
+            changed = True
+        for item in new_ids:
+            if item not in hidden:
+                hidden.append(item)
+                changed = True
+        entry["hidden"] = hidden
+if changed:
+    p.write_text(json.dumps(d, indent=2) + "\n")
+PY
+  log "hid NVIDIA PAIR tray icon(s): $(printf '%s' "$ids" | tr '\n' ' ')"
+  emit_status 0
+}
+
 cmd_launch() {
   adopt_existing || true
   pair_binary_present || die "PAIR is not installed. Run: pair-ctl install"
@@ -376,12 +461,15 @@ cmd_launch() {
       hyprctl dispatch focuswindow class:nvpair >/dev/null 2>&1 || true
     fi
     log "PAIR is already running"
+    cmd_hide_tray >/dev/null || true
     emit_status 1
     return 0
   fi
   nohup "$BIN_DIR/nvpair-desktop" >/dev/null 2>&1 &
   disown || true
   log "launched PAIR desktop"
+  sleep 1
+  cmd_hide_tray >/dev/null || true
   emit_status 1
 }
 
@@ -582,6 +670,7 @@ main() {
     launch) cmd_launch "$@" ;;
     stop) cmd_stop "$@" ;;
     firewall) cmd_firewall "$@" ;;
+    hide-tray) cmd_hide_tray "$@" ;;
     -h | --help | help | "") usage ;;
     *) die "unknown command: $cmd" ;;
   esac

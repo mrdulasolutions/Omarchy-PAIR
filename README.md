@@ -32,13 +32,13 @@ The first download is about 135 MB.
 
 ## Usage
 
-Once NVIDIA PAIR is running, this helper **hides**. The remaining PAIR icon in the top bar is NVIDIA’s official tray icon (via Omarchy’s system tray). The helper is only for install, updates, and firewall ports.
+This plugin is the **only** PAIR control in the Omarchy bar. NVIDIA’s Electron tray popup closes as soon as you leave the top bar on Hyprland, so the plugin hides that tray icon and owns the chip:
 
 | Action | What it does |
 | --- | --- |
-| Left click | Open the helper panel |
-| Right-click the icon | Install PAIR, or launch it if it is already installed |
-| Middle-click the icon | Check GitHub for a newer PAIR app, or update it |
+| Left click | Open / focus the PAIR app (or the helper panel if PAIR is not installed) |
+| Right-click | Helper panel: install, update, firewall |
+| Middle-click | Check GitHub for a newer PAIR app, or update it |
 | **Install NVIDIA PAIR** | Download the latest NVIDIA release and unpack it into `~/.local/opt/PAIR` |
 | **Launch / Open PAIR** | Start the desktop app, or focus it if it is already running |
 | **Check for PAIR updates** | Ask GitHub for the latest `NVIDIA/Personal-AI-Router` release |
@@ -126,7 +126,7 @@ These are pairing problems, not missing models. PAIR does **not** need a local L
 
 ### Two PAIR icons in the top bar
 
-NVIDIA PAIR creates a **tray** icon. This plugin also adds a **helper** chip. They are not two copies of PAIR. The dim/broken-looking chip is the helper. It now hides while PAIR is running so only the official tray remains.
+NVIDIA PAIR’s Electron tray icon is unusable on Omarchy: its popup closes when you move off the top bar. This plugin hides that tray entry (`pair-ctl hide-tray`) and is the single PAIR chip. Left-click opens the app; right-click opens install/update/firewall.
 
 ### Linux never shows a PIN when another PC adds this node
 

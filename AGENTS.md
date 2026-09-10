@@ -95,7 +95,7 @@ Do **not** edit `/usr/share/omarchy/`.
 
 ## After install, tell the user
 
-- NVIDIA PAIR’s **tray** icon is the official app. This plugin’s bar chip is a helper and hides while PAIR is running.
+- This plugin is the only PAIR chip. It hides NVIDIA’s Electron tray icon (`pair-ctl hide-tray`) because that tray popup closes when you leave the Omarchy bar.
 - PAIR window: first-run can install Ollama (default) or LM Studio.
 - Apps should use `http://127.0.0.1:11434` (Ollama) or `http://127.0.0.1:1234` (OpenAI).
 - Pairing other PCs uses a six-digit PIN on the same LAN.
