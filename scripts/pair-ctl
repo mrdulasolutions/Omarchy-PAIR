@@ -9,15 +9,20 @@
 
 set -euo pipefail
 export PATH="/usr/bin:/usr/local/bin:${PATH:-}"
+if [[ -z ${HOME:-} || $HOME == / ]]; then
+  HOME=$(getent passwd "$(id -u)" | cut -d: -f6)
+  export HOME
+fi
 # debug: prove the panel actually spawned us
 { printf '%s %s\n' "$(date -Is)" "$*"; } >>"${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair/ctl.log" 2>/dev/null || true
 
 PLUGIN_ID="io.github.mrdulasolutions.pair"
-PLUGIN_VERSION="1.1.0"
+PLUGIN_VERSION="1.1.1"
 UPSTREAM_REPO="NVIDIA/Personal-AI-Router"
 INSTALL_ROOT="${PAIR_HOME:-$HOME/.local/opt/PAIR}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair"
 STATE_FILE="$STATE_DIR/installed.json"
+STATUS_JSON="$STATE_DIR/status.json"
 LATEST_CACHE="$STATE_DIR/latest.json"
 BIN_DIR="$HOME/.local/bin"
 DESKTOP_DIR="$HOME/.local/share/applications"
@@ -483,6 +488,7 @@ emit_json() {
     gpu_note="No NVIDIA GPU detected. PAIR can still run here and route work to other machines that have one."
   fi
 
+  mkdir -p "$STATE_DIR"
   local firewall_blocked=false pairing_note=""
   if [[ -f /etc/ufw/ufw.conf ]] && grep -q '^ENABLED=yes' /etc/ufw/ufw.conf 2>/dev/null && ! ufw_pair_configured; then
     firewall_blocked=true
@@ -504,7 +510,8 @@ emit_json() {
     message="PAIR ${current:-} is installed. Launch it to start the local endpoints."
   fi
 
-  jq -n \
+  local payload
+  payload=$(jq -n \
     --argjson ok "$([[ -z $error ]] && echo true || echo false)" \
     --arg error "$error" \
     --arg pluginId "$PLUGIN_ID" \
@@ -544,7 +551,10 @@ emit_json() {
       message: $message,
       endpoints: {ollama: $ollama, openai: $openai},
       commands: {desktop: $desktop, tui: $tui}
-    }'
+    }')
+  printf '%s\n' "$payload"
+  printf '%s\n' "$payload" >"$STATUS_JSON.tmp"
+  mv -f "$STATUS_JSON.tmp" "$STATUS_JSON"
 }
 
 emit_status() {

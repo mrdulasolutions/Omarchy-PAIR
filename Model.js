@@ -3,7 +3,7 @@ function emptyStatus() {
     ok: true,
     error: "",
     pluginId: "io.github.mrdulasolutions.pair",
-    pluginVersion: "1.1.0",
+    pluginVersion: "1.1.1",
     installed: false,
     running: false,
     pairVersion: "",
@@ -24,11 +24,12 @@ function emptyStatus() {
 function parseStatus(text) {
   var raw = String(text || "").replace(/^\uFEFF/, "").trim()
   var start = raw.lastIndexOf("{")
-  if (start < 0) return emptyStatus()
+  if (start < 0) return null
   try {
     var data = JSON.parse(raw.slice(start))
     var base = emptyStatus()
-    if (!data || typeof data !== "object") return base
+    if (!data || typeof data !== "object") return null
+    if (String(data.pluginId || "") !== base.pluginId) return null
     base.ok = data.ok !== false
     base.error = String(data.error || "")
     base.pluginVersion = String(data.pluginVersion || base.pluginVersion)
@@ -54,11 +55,7 @@ function parseStatus(text) {
     }
     return base
   } catch (e) {
-    var failed = emptyStatus()
-    failed.ok = false
-    failed.error = "Could not read PAIR status."
-    failed.message = failed.error
-    return failed
+    return null
   }
 }
 

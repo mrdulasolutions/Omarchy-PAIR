@@ -14,6 +14,7 @@ Panel {
   readonly property var barIdentity: root
   readonly property string pairIcon: "󰢮"
   readonly property string ctlPath: Quickshell.env("HOME") + "/.config/omarchy/plugins/io.github.mrdulasolutions.pair/scripts/pair-ctl"
+  readonly property string statusPath: Quickshell.env("HOME") + "/.local/state/omarchy-pair/status.json"
 
   property var status: Model.emptyStatus()
   property bool pairInstalled: false
@@ -75,6 +76,7 @@ Panel {
 
   function applyStatus(text) {
     var next = Model.parseStatus(text)
+    if (!next || next.pluginId !== "io.github.mrdulasolutions.pair") return
     root.status = next
     root.pairInstalled = next.installed === true
     root.pairRunning = next.running === true
@@ -168,16 +170,32 @@ Panel {
     }
   }
 
+  FileView {
+    id: statusFile
+    path: root.statusPath
+    preload: true
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      var body = ""
+      try { body = text() } catch (e) { body = text }
+      if (body && String(body).trim() !== "") root.applyStatus(body)
+    }
+  }
+
   Process {
     id: statusProc
     command: ["/usr/bin/bash", root.ctlPath, "status"]
     stdout: StdioCollector {
       id: statusOut
       waitForEnd: true
-      onStreamFinished: root.applyStatus(text)
     }
     onExited: function(exitCode) {
-      if (exitCode !== 0 && root.lastError === "")
+      var out = statusOut.text ? statusOut.text : ""
+      if (out !== "") root.applyStatus(out)
+      statusFile.reload()
+      if (exitCode !== 0 && root.lastError === "" && !root.pairInstalled)
         root.lastError = "Could not read PAIR status (exit " + exitCode + ")."
     }
   }
@@ -188,7 +206,10 @@ Panel {
     stdout: StdioCollector {
       id: latestOut
       waitForEnd: true
-      onStreamFinished: root.applyStatus(text)
+    }
+    onExited: function(exitCode) {
+      if (exitCode === 0 && latestOut.text) root.applyStatus(latestOut.text)
+      statusFile.reload()
     }
   }
 
@@ -198,7 +219,6 @@ Panel {
     stdout: StdioCollector {
       id: actionOut
       waitForEnd: true
-      onStreamFinished: root.applyStatus(text)
     }
     stderr: SplitParser {
       onRead: function(line) {
@@ -225,7 +245,13 @@ Panel {
     }
   }
 
-  Component.onCompleted: Qt.callLater(function() { root.refresh(false) })
+  Component.onCompleted: Qt.callLater(function() {
+    statusFile.reload()
+    var body = ""
+    try { body = statusFile.text() } catch (e) { body = "" }
+    if (body && String(body).trim() !== "") root.applyStatus(body)
+    root.refresh(false)
+  })
 
   KeyboardPanel {
     id: panel
@@ -299,7 +325,7 @@ Panel {
 
         Column {
           width: parent.width
-          visible: root.pairInstalled
+          visible: true
           spacing: Style.space(6)
 
           Text {
@@ -403,7 +429,7 @@ Panel {
 
         Button {
           width: parent.width
-          visible: root.pairInstalled
+          visible: true
           text: root.pairFirewallBlocked ? "Allow PAIR on LAN" : "Check PAIR firewall"
           iconText: "󰦝"
           enabled: !root.busy

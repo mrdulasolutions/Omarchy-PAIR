@@ -8,6 +8,10 @@ Omarchy is Arch-based. NVIDIA only ships a `.deb`. This plugin extracts that pac
 
 ![NVIDIA PAIR panel](preview.png)
 
+A live cluster after pairing Omarchy (Linux) with a Mac:
+
+![PAIR cluster with Omarchy and Mac](pair-cluster.png)
+
 ## Install the plugin
 
 ```sh
@@ -157,6 +161,14 @@ Addresses move. Prefer the discovered name (`MRDulas-MacBook-Pro`, `omarchy`) ov
 
 A node without a GPU, Ollama, or a downloaded model can still join a cluster and route. Install an engine only on machines that should **serve** requests.
 
+### This Linux node shows up as `127.0.0.1` in the cluster
+
+PAIR’s local member record can list `omarchy` at `127.0.0.1:14321` even while discovery advertises the LAN address. Peers still find the node over mDNS. If a Mac can pair but cannot send work *to* this PC, check that inventory port `14318` is allowed (same `pair-ctl firewall` rules).
+
+### Ollama desktop steals port 11434
+
+If chat works but PAIR **Jobs** stays empty, the Ollama *desktop app* is bound to `11434`. Quit it (including the tray icon), then toggle Ollama off and on in PAIR.
+
 ### In-app PAIR updater on Omarchy
 
 **Settings → Service → Download update** expects Debian `apt` and `/opt/PAIR`. Use `pair-ctl update` instead.
@@ -211,6 +223,17 @@ omarchy-shell shell summon io.github.mrdulasolutions.pair '{}'
 | `Model.js` | Status JSON helpers |
 | `scripts/pair-ctl` | Install / update / launch NVIDIA PAIR |
 | `AGENTS.md` | Instructions for coding agents |
+
+## Marketplace listing
+
+The repo is a normal Omarchy plugin: `manifest.json` at the root, `omarchy plugin validate` passes, MIT license, install/remove in this README, no symlinks, id `io.github.mrdulasolutions.pair`.
+
+List it from the [plugin submit form](https://github.com/omacom/omarchy-plugin-marketplace/issues/new?template=submit-plugin.yml):
+
+- Repository: `https://github.com/mrdulasolutions/Omarchy-PAIR.git`
+- Category: **System** (or Developer Tools)
+- Tags (max three): **AI**, **Bar**, **System**
+- Notes: downloads NVIDIA PAIR from GitHub into `~/.local`; `pair-ctl firewall` needs sudo to open ufw LAN ports; does not overwrite Hyprland or shell config.
 
 ## License
 
