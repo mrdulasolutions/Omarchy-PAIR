@@ -41,6 +41,9 @@ BarWidget {
   readonly property bool busy: actionProc.running
   readonly property bool pairReady: pairRunning || pairInstalled
   readonly property int pairNodeCount: pairNodes && pairNodes.length ? pairNodes.length : 0
+  readonly property string healthLevel: Model.healthLevel(pairInstalled, pairRunning, lastError !== "", pairNodes)
+  readonly property color healthColor: Model.healthColor(healthLevel, bar && bar.urgent ? bar.urgent : Color.urgent)
+  readonly property string healthLabel: Model.healthLabel(healthLevel, pairInstalled, pairRunning, pairNodeCount)
   readonly property var updater: Model.updateAction({ updateAvailable: pairUpdateAvailable, latestVersion: pairLatest }, busy && focusAction === "update")
   readonly property string heroMeta: {
     if (pairRunning && pairVersion) return "PAIR " + pairVersion.toUpperCase()
@@ -48,12 +51,7 @@ BarWidget {
     if (pairInstalled) return "INSTALLED"
     return "NOT INSTALLED"
   }
-  readonly property string heroDetail: {
-    if (pairNodeCount > 0) return (pairRunning ? "RUNNING" : "CLUSTER") + " · " + pairNodeCount + (pairNodeCount === 1 ? " NODE" : " NODES")
-    if (pairRunning) return "RUNNING"
-    if (pairInstalled) return "IDLE"
-    return ""
-  }
+  readonly property string heroDetail: healthLabel
   readonly property string primaryLabel: {
     if (busy && focusAction === "primary") return "Working…"
     if (pairRunning) return "Open PAIR"
@@ -64,8 +62,10 @@ BarWidget {
   readonly property string tooltipText: {
     if (busy) return "NVIDIA PAIR — " + (progressText !== "" ? progressText : "working")
     if (pairUpdateAvailable) return "NVIDIA PAIR — update " + pairLatest + " available"
-    if (pairRunning && pairNodeCount > 0) return "PAIR — " + pairNodeCount + (pairNodeCount === 1 ? " node" : " nodes") + " (right-click for cluster)"
-    if (pairRunning) return "PAIR — open app (right-click for cluster/install/update)"
+    if (healthLevel === "ok") return "PAIR — running, " + pairNodeCount + (pairNodeCount === 1 ? " node" : " nodes")
+    if (healthLevel === "warn") return "PAIR — running, no cluster nodes"
+    if (!pairInstalled) return "PAIR — install NVIDIA PAIR"
+    if (!pairRunning) return "PAIR — not running"
     if (pairInstalled) return "PAIR — launch NVIDIA PAIR"
     return "PAIR — install NVIDIA PAIR"
   }
@@ -416,13 +416,14 @@ BarWidget {
     anchors.fill: parent
     bar: root.bar
     text: ""
-    dimmed: root.busy || !root.pairReady
+    dimmed: root.busy
     tooltipText: root.tooltipText
     iconComponent: Component {
       PairIcon {
         anchors.fill: parent
         fallbackColor: button.foreground
         fallbackFontFamily: button.fontFamily
+        healthColor: root.healthColor
       }
     }
     onPressed: function(b) {

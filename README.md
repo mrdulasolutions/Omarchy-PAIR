@@ -34,6 +34,8 @@ The first download is about 135 MB.
 
 This plugin is the **only** PAIR control in the Omarchy bar. NVIDIA’s Electron tray popup closes as soon as you leave the top bar on Hyprland, so the plugin hides that tray icon and owns the chip. Left-click is the tray’s working action: open or focus the PAIR window.
 
+The chip’s status dot is a traffic light: **red** PAIR is down or missing, **yellow** running with no cluster peers, **green** running with at least one other node online.
+
 | Action | What it does |
 | --- | --- |
 | Left click | Open / focus the PAIR app (or the helper panel if PAIR is not installed) |

@@ -36,6 +36,9 @@ Panel {
   readonly property var updater: host && host.updater ? host.updater : Model.updateAction({}, false)
   readonly property var pairNodes: host && host.pairNodes ? host.pairNodes : []
   readonly property bool showKnownIssues: host ? host.showKnownIssues === true : false
+  readonly property string healthLevel: host && host.healthLevel ? host.healthLevel : "fail"
+  readonly property color healthColor: host && host.healthColor ? host.healthColor : Color.urgent
+  readonly property string healthLabel: host && host.healthLabel ? host.healthLabel : "NOT INSTALLED"
 
   readonly property string focusAction: host && host.focusAction ? host.focusAction : "primary"
   readonly property bool cursorActive: host ? host.cursorActive === true : false
@@ -126,7 +129,7 @@ Panel {
         PanelHero {
           title: "NVIDIA PAIR"
           meta: root.heroMeta
-          detail: root.heroDetail
+          detail: ""
           foreground: root.contentForeground
           fontFamily: root.contentFontFamily
           iconComponent: Component {
@@ -134,6 +137,27 @@ Panel {
               iconSize: Style.font.display
               fallbackColor: root.contentForeground
               fallbackFontFamily: root.contentFontFamily
+              healthColor: root.healthColor
+            }
+          }
+          trailingControl: Component {
+            Rectangle {
+              implicitWidth: healthText.implicitWidth + Style.space(12)
+              implicitHeight: healthText.implicitHeight + Style.space(6)
+              radius: Style.cornerRadius
+              color: Qt.rgba(root.healthColor.r, root.healthColor.g, root.healthColor.b, 0.16)
+              border.width: 1
+              border.color: root.healthColor
+
+              Text {
+                id: healthText
+                anchors.centerIn: parent
+                text: root.healthLabel
+                color: root.healthColor
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.body
+                font.bold: true
+              }
             }
           }
         }
@@ -141,7 +165,7 @@ Panel {
         Text {
           width: parent.width
           text: root.statusText
-          color: root.lastError !== "" ? root.contentUrgent : Qt.darker(root.contentForeground, 1.4)
+          color: root.lastError !== "" ? root.contentUrgent : root.healthColor
           font.family: root.contentFontFamily
           font.pixelSize: Style.font.caption
           wrapMode: Text.WordWrap
@@ -198,7 +222,7 @@ Panel {
                 Text {
                   id: badge
                   text: Model.nodeMeta(nodeBlock.node)
-                  color: Qt.darker(root.contentForeground, 1.35)
+                  color: Model.nodeMetaColor(nodeBlock.node, "#3ea072", "#d4a017", root.contentUrgent)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
                   font.bold: true

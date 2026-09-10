@@ -3,7 +3,7 @@ function emptyStatus() {
     ok: true,
     error: "",
     pluginId: "io.github.mrdulasolutions.pair",
-    pluginVersion: "1.2.3",
+    pluginVersion: "1.2.4",
     installed: false,
     running: false,
     pairVersion: "",
@@ -121,10 +121,59 @@ function nodeMeta(node) {
   return "OFFLINE"
 }
 
+function nodeMetaColor(node, ok, warn, fail) {
+  if (!node) return fail
+  if (node.local) return node.online === false ? warn : ok
+  if (node.online) return ok
+  return fail
+}
+
 function nodeDetail(node) {
   if (!node) return ""
   var parts = []
   if (node.ip) parts.push(node.ip)
   if (node.gpu) parts.push(node.gpu)
   return parts.join("  ·  ")
+}
+
+function remoteOnlineCount(nodes) {
+  var n = 0
+  if (!nodes || typeof nodes.length !== "number") return 0
+  for (var i = 0; i < nodes.length; i++) {
+    if (nodes[i] && nodes[i].local !== true && nodes[i].online === true) n++
+  }
+  return n
+}
+
+function remoteCount(nodes) {
+  var n = 0
+  if (!nodes || typeof nodes.length !== "number") return 0
+  for (var i = 0; i < nodes.length; i++) {
+    if (nodes[i] && nodes[i].local !== true) n++
+  }
+  return n
+}
+
+// fail = red, warn = yellow, ok = green
+function healthLevel(installed, running, error, nodes) {
+  if (!installed || !running) return "fail"
+  if (remoteCount(nodes) === 0 || remoteOnlineCount(nodes) === 0) return "warn"
+  return "ok"
+}
+
+function healthColor(level, urgent) {
+  if (level === "fail") return urgent || "#c45c5c"
+  if (level === "warn") return "#d4a017"
+  return "#3ea072"
+}
+
+function healthLabel(level, installed, running, nodeCount) {
+  if (level === "ok") {
+    if (nodeCount > 0) return "RUNNING · " + nodeCount + (nodeCount === 1 ? " NODE" : " NODES")
+    return "RUNNING"
+  }
+  if (level === "warn") return "NO NODES"
+  if (!installed) return "NOT INSTALLED"
+  if (!running) return "STOPPED"
+  return "FAILED"
 }
