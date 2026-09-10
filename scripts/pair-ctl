@@ -16,7 +16,7 @@ fi
 unset PAIR_HOME || true
 
 PLUGIN_ID="io.github.mrdulasolutions.pair"
-PLUGIN_VERSION="0.0.2"
+PLUGIN_VERSION="0.0.3"
 UPSTREAM_REPO="NVIDIA/Personal-AI-Router"
 SCRIPT_DIR=$(cd "$(dirname -- "$0")" && pwd)
 PLUGIN_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
@@ -74,55 +74,35 @@ arch_deb() {
   esac
 }
 
-require_user_dir() {
+PATHGUARD="$SCRIPT_DIR/pathguard.py"
+
+pg() {
+  /usr/bin/python3 "$PATHGUARD" "$@"
+}
+
+rel_from_home() {
   local p="$1"
-  [[ -n $p ]] || die "empty path"
-  if [[ -L $p ]]; then
-    die "refusing symlink path: $p"
-  fi
-  if [[ -e $p && ! -d $p ]]; then
-    die "not a directory: $p"
-  fi
+  case "$p" in
+    "$HOME"/*) printf '%s\n' "${p#"$HOME"/}" ;;
+    *) die "path is not under HOME" ;;
+  esac
 }
 
 ensure_private_dir() {
-  local p="$1"
-  mkdir -p -m 700 "$p"
-  require_user_dir "$p"
-  local uid
-  uid=$(stat -c '%u' "$p")
-  [[ $uid == "$(id -u)" ]] || die "directory not owned by current user: $p"
+  pg ensure "$(rel_from_home "$1")"
 }
 
 atomic_write() {
-  local dest="$1"
-  local dir t
-  dir=$(dirname -- "$dest")
-  ensure_private_dir "$dir"
-  umask 077
-  t=$(mktemp -p "$dir" .tmp.XXXXXXXXXX)
-  cat >"$t"
-  mv -f -T -- "$t" "$dest"
+  pg atomic-write "$(rel_from_home "$1")"
 }
 
 require_install_root() {
   [[ $INSTALL_ROOT == "$HOME/.local/opt/PAIR" ]] || die "refusing install path $INSTALL_ROOT"
-  if [[ -e $INSTALL_ROOT || -L $INSTALL_ROOT ]]; then
-    [[ ! -L $INSTALL_ROOT ]] || die "install path is a symlink"
-    [[ -d $INSTALL_ROOT ]] || die "install path is not a directory"
-    local uid
-    uid=$(stat -c '%u' "$INSTALL_ROOT")
-    [[ $uid == "$(id -u)" ]] || die "install path not owned by current user"
-  fi
 }
 
 remove_install_root() {
   require_install_root
-  [[ -e $INSTALL_ROOT ]] || return 0
-  if [[ ! -e $INSTALL_ROOT/.omarchy-pair-version && ! -x $INSTALL_ROOT/nvpair ]]; then
-    die "refusing to delete unrecognized directory $INSTALL_ROOT"
-  fi
-  rm -rf -- "$INSTALL_ROOT"
+  pg rm-tree .local/opt/PAIR
 }
 
 pinned_release() {
@@ -187,7 +167,8 @@ EOF
 # NVIDIA Personal AI Router desktop application (Omarchy / Hyprland).
 exec "$INSTALL_ROOT/nvpair" --ozone-platform-hint=auto "\$@"
 EOF
-  chmod 0755 "$BIN_DIR/nvpair" "$BIN_DIR/nvpair-desktop"
+  pg chmod .local/bin/nvpair 755
+  pg chmod .local/bin/nvpair-desktop 755
   atomic_write "$DESKTOP_DIR/nvpair.desktop" <<EOF
 [Desktop Entry]
 Name=Personal AI Router
@@ -212,16 +193,11 @@ EOF
 
 install_icons_from() {
   local src_root="$1"
-  local sz src dest t
+  local sz src
   for sz in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
     src="$src_root/usr/share/icons/hicolor/$sz/apps/nvpair.png"
     [[ -f $src && ! -L $src ]] || continue
-    dest="$ICON_ROOT/$sz/apps"
-    ensure_private_dir "$dest"
-    umask 077
-    t=$(mktemp -p "$dest" .icon.XXXXXXXXXX)
-    cp -- "$src" "$t"
-    mv -f -T -- "$t" "$dest/nvpair.png"
+    pg copy-file "$src" ".local/share/icons/hicolor/$sz/apps/nvpair.png"
   done
   if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -q -t -f "$ICON_ROOT" >/dev/null 2>&1 || true
@@ -278,53 +254,6 @@ adopt_existing() {
   log "adopted existing PAIR at $INSTALL_ROOT (version $ver)"
 }
 
-extract_deb() {
-  local deb="$1" dest="$2"
-  mkdir -p "$dest"
-  (cd "$dest" && /usr/bin/ar x "$deb")
-  local data
-  data=$(find "$dest" -maxdepth 1 -name 'data.tar.*' -type f | head -n1)
-  [[ -n $data && -f $data && ! -L $data ]] || die "deb has no data.tar.*"
-  /usr/bin/python3 - "$data" "$dest" <<'PY'
-import os, sys, tarfile
-
-src, dest = sys.argv[1], sys.argv[2]
-wanted = []
-nvpair = False
-with tarfile.open(src, "r:*") as tf:
-    for member in tf.getmembers():
-        name = member.name.lstrip("./")
-        parts = name.split("/")
-        if name.startswith("/") or any(p == ".." for p in parts):
-            sys.exit("unsafe tar member: " + name)
-        if member.issym() or member.islnk() or member.isdev() or member.isfifo():
-            sys.exit("refusing special tar member: " + name)
-        if not (member.isfile() or member.isdir()):
-            continue
-        ok = (
-            name == "opt/PAIR"
-            or name.startswith("opt/PAIR/")
-            or name.startswith("usr/share/icons/hicolor/")
-        )
-        if not ok:
-            continue
-        member.name = name
-        wanted.append(member)
-        if name == "opt/PAIR/nvpair" and member.isfile():
-            nvpair = True
-    if not nvpair:
-        sys.exit("package did not contain opt/PAIR/nvpair")
-    kwargs = {"path": dest, "members": wanted}
-    if hasattr(tarfile, "data_filter"):
-        kwargs["filter"] = "data"
-    tf.extractall(**kwargs)
-bin_path = os.path.join(dest, "opt", "PAIR", "nvpair")
-if not os.path.isfile(bin_path) or os.path.islink(bin_path):
-    sys.exit("extracted nvpair is missing or a symlink")
-os.chmod(bin_path, 0o755)
-PY
-}
-
 cmd_install() {
   need_cmd curl
   need_cmd jq
@@ -373,34 +302,18 @@ cmd_install() {
     sleep 1
   fi
 
-  ensure_private_dir "$STATE_DIR"
-  local tmp
-  tmp=$(mktemp -d "$STATE_DIR/download.XXXXXX")
-  trap 'rm -rf "$tmp"' RETURN
-
-  local deb="$tmp/$name"
+  pg ensure .local/state/omarchy-pair
   log "downloading pinned $name"
   /usr/bin/curl -q --fail -sS -L --proto =https --proto-redir =https \
-    -A "$USER_AGENT" --max-time 600 --max-filesize "$size" -o "$deb" -- "$url" \
+    -A "$USER_AGENT" --max-time 600 --max-filesize "$size" -- "$url" \
+    | pg atomic-write .local/state/omarchy-pair/incoming.deb \
     || die "download failed: $url"
-  local got_size got_sha
-  got_size=$(stat -c '%s' "$deb")
-  [[ $got_size == "$size" ]] || die "downloaded size $got_size != pinned $size"
-  got_sha=$(/usr/bin/sha256sum -b "$deb" | awk '{print $1}')
-  [[ $got_sha == "$sha" ]] || die "SHA-256 mismatch (got $got_sha, pinned $sha)"
+  pg verify-file .local/state/omarchy-pair/incoming.deb "$sha" "$size"
 
   log "extracting Debian package (Omarchy cannot apt-install this)"
-  extract_deb "$deb" "$tmp/extract"
-  [[ -x $tmp/extract/opt/PAIR/nvpair && ! -L $tmp/extract/opt/PAIR/nvpair ]] \
-    || die "package did not contain a regular opt/PAIR/nvpair"
-
-  log "installing into $INSTALL_ROOT"
-  ensure_private_dir "$HOME/.local/opt"
-  remove_install_root
-  mv -- "$tmp/extract/opt/PAIR" "$INSTALL_ROOT"
-  require_install_root
-  printf '%s\n' "$version" | atomic_write "$INSTALL_ROOT/.omarchy-pair-version"
-  install_icons_from "$tmp/extract"
+  pg extract-and-publish .local/state/omarchy-pair/incoming.deb
+  pg unlink .local/state/omarchy-pair/incoming.deb
+  printf '%s\n' "$version" | pg atomic-write .local/opt/PAIR/.omarchy-pair-version
   write_wrappers
   write_state "$version" "$tag" "$arch" "$url"
   log "installed NVIDIA PAIR $version"
@@ -425,19 +338,19 @@ cmd_uninstall() {
   fi
   remove_install_root
   if [[ -f $BIN_DIR/nvpair ]] && grep -q 'NVIDIA Personal AI Router terminal UI' "$BIN_DIR/nvpair" 2>/dev/null; then
-    rm -f -- "$BIN_DIR/nvpair"
+    pg unlink .local/bin/nvpair
   fi
   if [[ -f $BIN_DIR/nvpair-desktop ]] && grep -q 'NVIDIA Personal AI Router desktop application' "$BIN_DIR/nvpair-desktop" 2>/dev/null; then
-    rm -f -- "$BIN_DIR/nvpair-desktop"
+    pg unlink .local/bin/nvpair-desktop
   fi
   if [[ -f $DESKTOP_DIR/nvpair.desktop ]] && grep -q 'Personal AI Router' "$DESKTOP_DIR/nvpair.desktop" 2>/dev/null; then
-    rm -f -- "$DESKTOP_DIR/nvpair.desktop"
+    pg unlink .local/share/applications/nvpair.desktop
   fi
   local sz
   for sz in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
-    rm -f -- "$ICON_ROOT/$sz/apps/nvpair.png"
+    pg unlink ".local/share/icons/hicolor/$sz/apps/nvpair.png" 2>/dev/null || true
   done
-  rm -f -- "$STATE_FILE"
+  pg unlink .local/state/omarchy-pair/installed.json 2>/dev/null || true
   if ((purge)); then
     log "purging PAIR cluster data (models in ~/.ollama are left alone)"
     local cfg="$HOME/.config/Nvidia Corporation/Personal AI Router"

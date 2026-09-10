@@ -238,6 +238,7 @@ omarchy-shell shell summon io.github.mrdulasolutions.pair '{}'
 | `nvpair.png` | Official NVIDIA PAIR icon used in the bar |
 | `Model.js` | Status JSON helpers |
 | `scripts/pair-ctl` | Install / update / launch NVIDIA PAIR |
+| `scripts/pathguard.py` | openat/no-follow path walk for install, writes, and delete |
 | `releases.lock.json` | Pinned NVIDIA `.deb` URLs, sizes, and SHA-256 digests |
 | `bar.png` | Top-bar screenshot |
 | `NOTICE` | NVIDIA PAIR icon attribution |
@@ -251,7 +252,7 @@ List it from the [plugin submit form](https://github.com/omacom/omarchy-plugin-m
 - Repository: `https://github.com/mrdulasolutions/Omarchy-PAIR.git`
 - Category: **System**
 - Tags (max three): **AI**, **Bar**, **System**
-- Notes: user-local installer for NVIDIA PAIR. Installs only the `.deb` pinned in `releases.lock.json` (SHA-256 checked, archive members validated) into `~/.local/opt/PAIR`. `PAIR_HOME` is ignored. `pair-ctl firewall` is the only sudo path (visible terminal, LAN PAIR ports). Hiding NVIDIA’s tray icon writes `omarchy.tray.hidden` in `shell.json` only after you click the chip or open the panel. Does not edit Hyprland config. `nvpair.png` is NVIDIA’s app icon (see NOTICE).
+- Notes: user-local installer for NVIDIA PAIR. Installs only the `.deb` pinned in `releases.lock.json` (SHA-256 checked, archive members validated) into `~/.local/opt/PAIR` via an `openat`/`O_NOFOLLOW` parent walk (`scripts/pathguard.py`). `PAIR_HOME` is ignored. `pair-ctl firewall` is the only sudo path (visible terminal, LAN PAIR ports). Hiding NVIDIA’s tray icon writes `omarchy.tray.hidden` in `shell.json` only after you click the chip or open the panel. Does not edit Hyprland config. `nvpair.png` is NVIDIA’s app icon (see NOTICE).
 
 ## License
 
