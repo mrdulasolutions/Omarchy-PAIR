@@ -3,7 +3,7 @@ function emptyStatus() {
     ok: true,
     error: "",
     pluginId: "io.github.mrdulasolutions.pair",
-    pluginVersion: "1.0.0",
+    pluginVersion: "1.1.0",
     installed: false,
     running: false,
     pairVersion: "",
@@ -13,6 +13,8 @@ function emptyStatus() {
     installRoot: "",
     hasNvidiaGpu: false,
     gpuNote: "",
+    pairingNote: "",
+    firewallBlocked: false,
     message: "Checking NVIDIA PAIR…",
     endpoints: { ollama: "http://127.0.0.1:11434", openai: "http://127.0.0.1:1234" },
     commands: { desktop: "", tui: "" }
@@ -39,6 +41,8 @@ function parseStatus(text) {
     base.installRoot = String(data.installRoot || "")
     base.hasNvidiaGpu = data.hasNvidiaGpu === true
     base.gpuNote = String(data.gpuNote || "")
+    base.pairingNote = String(data.pairingNote || "")
+    base.firewallBlocked = data.firewallBlocked === true
     base.message = String(data.message || "")
     if (data.endpoints && typeof data.endpoints === "object") {
       base.endpoints.ollama = String(data.endpoints.ollama || base.endpoints.ollama)

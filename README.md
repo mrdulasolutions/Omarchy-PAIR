@@ -48,6 +48,12 @@ After PAIR is running, local apps should talk to:
 
 In the PAIR window, install Ollama (default) or LM Studio, add a model, and pair other machines with the six-digit PIN.
 
+**Before pairing another PC**, open PAIR’s LAN ports. Omarchy’s firewall (`ufw`) defaults to deny incoming, so the other machine can see this node in discovery but cannot complete Add node. From the bar panel click **Allow PAIR on LAN**, or:
+
+```sh
+~/.config/omarchy/plugins/io.github.mrdulasolutions.pair/scripts/pair-ctl firewall
+```
+
 ## Two different updates
 
 There are two pieces of software. Update them separately.
@@ -107,6 +113,53 @@ Do not run `nvpair` (TUI) while the desktop app is open. They fight over the sam
 PAIR itself does not need an NVIDIA GPU. A node without a GPU can still route requests to machines that have one.
 
 Local inference still needs Ollama or LM Studio plus a model, and enough memory for that model. GeForce RTX 20-series and newer, RTX PRO, DGX Spark, and Apple M4+ are NVIDIA’s validated inference hardware.
+
+## Known issues
+
+These are pairing problems, not missing models. PAIR does **not** need a local LLM to add a node.
+
+### Linux never shows a PIN when another PC adds this node
+
+Omarchy enables `ufw` with `DEFAULT_INPUT_POLICY=DROP`. NVIDIA PAIR listens on the LAN, but the firewall drops the other machine’s SYN packets.
+
+Typical kernel log:
+
+```
+UFW BLOCK SRC=<other-pc> DST=<this-pc> DPT=14321
+UFW BLOCK SRC=<other-pc> DST=<this-pc> DPT=14318
+```
+
+Discovery (mDNS) can still work, so the other PC lists this node, then pairing hangs or the PIN dialog never appears here.
+
+Fix — allow the LAN only:
+
+```sh
+sudo ufw allow from 192.168.1.0/24 to any port 14318:14323 proto tcp comment 'NVIDIA PAIR'
+sudo ufw allow from 192.168.1.0/24 to any port 5353 proto udp comment 'NVIDIA PAIR mDNS'
+```
+
+Replace `192.168.1.0/24` with your subnet, or run `pair-ctl firewall` and enter your sudo password. Ports: TCP `14318–14323` (inventory, pairing, engines) and UDP `5353` (mDNS).
+
+### PIN dialog closes / “already in another cluster”
+
+Clicking **Add node** on a machine **creates a new cluster** with only itself in it. If you start a second invite, close the PIN, or time out, that cluster is torn down and the next PIN is a different cluster. The other PC then reports that this node is already in another cluster.
+
+- **Settings → Cluster → Leave** on **both** machines first (even if the list looks empty).
+- Start **one** invite. Keep that PIN on the inviting machine until **Cluster** lists the peer.
+- Do not reuse an old PIN. Do not close the PIN window when the other dialog closes — wait for the connected-node list.
+- If the Mac sat unclustered for a while, fully quit and reopen PAIR there (NVIDIA known issue: macOS can stop answering LAN connections).
+
+### Wrong IP / DHCP
+
+Addresses move. Prefer the discovered name (`MRDulas-MacBook-Pro`, `omarchy`) over a typed IP. Confirm with `ip neigh` / ping before retrying a stale address.
+
+### Pairing is not an LLM problem
+
+A node without a GPU, Ollama, or a downloaded model can still join a cluster and route. Install an engine only on machines that should **serve** requests.
+
+### In-app PAIR updater on Omarchy
+
+**Settings → Service → Download update** expects Debian `apt` and `/opt/PAIR`. Use `pair-ctl update` instead.
 
 ## Remove
 

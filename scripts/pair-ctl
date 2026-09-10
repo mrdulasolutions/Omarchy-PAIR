@@ -3,8 +3,9 @@
 # SPDX-License-Identifier: MIT
 #
 # Install, update, uninstall, launch, and report NVIDIA Personal AI Router
-# (PAIR) on Omarchy. No sudo. The official NVIDIA Linux package is a .deb
-# for Debian/Ubuntu; this extracts that package into ~/.local.
+# (PAIR) on Omarchy. Install itself needs no sudo (it unpacks a .deb into
+# ~/.local). `firewall` is the exception: Omarchy ufw needs sudo to allow
+# pairing ports.
 
 set -euo pipefail
 export PATH="/usr/bin:/usr/local/bin:${PATH:-}"
@@ -12,7 +13,7 @@ export PATH="/usr/bin:/usr/local/bin:${PATH:-}"
 { printf '%s %s\n' "$(date -Is)" "$*"; } >>"${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair/ctl.log" 2>/dev/null || true
 
 PLUGIN_ID="io.github.mrdulasolutions.pair"
-PLUGIN_VERSION="1.0.0"
+PLUGIN_VERSION="1.1.0"
 UPSTREAM_REPO="NVIDIA/Personal-AI-Router"
 INSTALL_ROOT="${PAIR_HOME:-$HOME/.local/opt/PAIR}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair"
@@ -34,6 +35,7 @@ Usage: pair-ctl <command>
   uninstall [--purge]       Remove the app (keep cluster data unless --purge)
   launch                    Start the PAIR desktop app
   stop                      Ask the PAIR desktop app to quit
+  firewall                  Open PAIR LAN ports in ufw (needs sudo)
 
 Omarchy is Arch-based. Do not apt-install the NVIDIA .deb.
 Do not use PAIR's in-app updater on Omarchy; it expects Debian.
@@ -386,6 +388,70 @@ cmd_stop() {
   emit_status 0
 }
 
+lan_cidr() {
+  python3 - <<'PY'
+import ipaddress, subprocess, sys
+out = subprocess.check_output(["ip", "-4", "-o", "addr", "show", "scope", "global"], text=True)
+for line in out.splitlines():
+    parts = line.split()
+    if len(parts) >= 4:
+        net = ipaddress.ip_interface(parts[3]).network
+        if net.is_private:
+            print(net)
+            sys.exit(0)
+print("192.168.1.0/24")
+PY
+}
+
+ufw_pair_configured() {
+  grep -Eq 'dport 14321|14318:14323' /etc/ufw/user.rules 2>/dev/null
+}
+
+cmd_firewall() {
+  local interactive=0
+  if [[ ${1:-} == --interactive ]]; then
+    interactive=1
+  elif [[ -n ${1:-} ]]; then
+    die "unknown firewall option: $1"
+  fi
+
+  if ! command -v ufw >/dev/null 2>&1; then
+    log "ufw is not installed; nothing to open"
+    emit_status 0
+    return 0
+  fi
+
+  local cidr
+  cidr=$(lan_cidr)
+  log "PAIR pairing needs inbound TCP 14318-14323 and UDP 5353 from $cidr"
+  log "Omarchy ufw defaults to DROP incoming, so Add node from another PC never reaches this machine."
+
+  if ufw_pair_configured; then
+    log "ufw already has PAIR rules"
+    emit_status 0
+    return 0
+  fi
+
+  if ((interactive == 0)) && [[ ! -t 0 ]] && command -v omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1; then
+    local self
+    self=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+    omarchy-launch-floating-terminal-with-presentation "bash $(printf '%q' "$self") firewall --interactive"
+    log "opened a terminal so you can enter your sudo password"
+    emit_status 0
+    return 0
+  fi
+
+  log "running: sudo ufw allow from $cidr to any port 14318:14323 proto tcp"
+  sudo ufw allow from "$cidr" to any port 14318:14323 proto tcp comment 'NVIDIA PAIR'
+  sudo ufw allow from "$cidr" to any port 5353 proto udp comment 'NVIDIA PAIR mDNS'
+  log "PAIR LAN ports are open"
+  if [[ -t 0 ]]; then
+    sudo ufw status numbered || true
+    read -r -p "Press Enter to close." _ || true
+  fi
+  emit_status 0
+}
+
 emit_json() {
   # $1 = include latest lookup (0/1), $2 optional error message
   local check_latest="${1:-0}"
@@ -417,11 +483,19 @@ emit_json() {
     gpu_note="No NVIDIA GPU detected. PAIR can still run here and route work to other machines that have one."
   fi
 
+  local firewall_blocked=false pairing_note=""
+  if [[ -f /etc/ufw/ufw.conf ]] && grep -q '^ENABLED=yes' /etc/ufw/ufw.conf 2>/dev/null && ! ufw_pair_configured; then
+    firewall_blocked=true
+    pairing_note="Omarchy ufw drops inbound PAIR. Other PCs cannot complete Add node here (no PIN on Linux) until LAN TCP 14318-14323 and UDP 5353 are allowed. Run: pair-ctl firewall"
+  fi
+
   local message
   if [[ -n $error ]]; then
     message="$error"
   elif [[ $installed != true ]]; then
     message="NVIDIA PAIR is not installed yet. Install it from this panel, or run scripts/pair-ctl install."
+  elif [[ $firewall_blocked == true ]]; then
+    message="$pairing_note"
   elif [[ $update == true ]]; then
     message="PAIR ${current:-unknown} is installed. GitHub has $latest — update the app with pair-ctl update, not the in-app updater."
   elif [[ $running == true ]]; then
@@ -444,6 +518,8 @@ emit_json() {
     --arg installRoot "$INSTALL_ROOT" \
     --argjson hasNvidiaGpu "$gpu" \
     --arg gpuNote "$gpu_note" \
+    --arg pairingNote "$pairing_note" \
+    --argjson firewallBlocked "$firewall_blocked" \
     --arg message "$message" \
     --arg ollama "http://127.0.0.1:11434" \
     --arg openai "http://127.0.0.1:1234" \
@@ -463,6 +539,8 @@ emit_json() {
       installRoot: $installRoot,
       hasNvidiaGpu: $hasNvidiaGpu,
       gpuNote: $gpuNote,
+      pairingNote: $pairingNote,
+      firewallBlocked: $firewallBlocked,
       message: $message,
       endpoints: {ollama: $ollama, openai: $openai},
       commands: {desktop: $desktop, tui: $tui}
@@ -493,6 +571,7 @@ main() {
     uninstall) cmd_uninstall "$@" ;;
     launch) cmd_launch "$@" ;;
     stop) cmd_stop "$@" ;;
+    firewall) cmd_firewall "$@" ;;
     -h | --help | help | "") usage ;;
     *) die "unknown command: $cmd" ;;
   esac

@@ -7,7 +7,8 @@ PAIR is a local router in front of Ollama / LM Studio.
 Official project: https://github.com/NVIDIA/Personal-AI-Router
 
 Omarchy is Arch-based (`ID_LIKE=arch`). NVIDIA’s Linux installer is a `.deb`.
-**Never** `apt install` that package here. **Never** `sudo` for this plugin.
+**Never** `apt install` that package here. Install/update of the app needs no sudo.
+**Do** use sudo for `pair-ctl firewall` — Omarchy ufw otherwise blocks pairing.
 
 ## If the user asked you to install PAIR
 
@@ -74,6 +75,7 @@ $pair-ctl install                # download + unpack latest
 $pair-ctl update                 # install latest if newer
 $pair-ctl launch                 # desktop app
 $pair-ctl stop
+$pair-ctl firewall               # sudo: allow LAN PAIR ports in ufw
 $pair-ctl uninstall              # keep ~/.config PAIR data
 $pair-ctl uninstall --purge      # also wipe PAIR cluster identity
 ```
@@ -97,6 +99,38 @@ Do **not** edit `/usr/share/omarchy/`.
 - Apps should use `http://127.0.0.1:11434` (Ollama) or `http://127.0.0.1:1234` (OpenAI).
 - Pairing other PCs uses a six-digit PIN on the same LAN.
 - A machine without an NVIDIA GPU can still run PAIR as a router node.
+- If pairing fails, fix the firewall first (below). It is not a missing LLM.
+
+## Pairing / “already in another cluster” / no PIN on Linux
+
+Omarchy `ufw` defaults to **deny incoming**. PAIR listens on `*:14321`, but the
+kernel drops the peer (`UFW BLOCK ... DPT=14321` and `DPT=14318`). Symptoms:
+
+- Other PC lists this node, but **this Linux box never shows a PIN**
+- PIN dialog on the other PC closes, or it says this node is **in another cluster**
+- Discovery works; TCP pairing does not
+
+Fix:
+
+```sh
+~/.config/omarchy/plugins/io.github.mrdulasolutions.pair/scripts/pair-ctl firewall
+```
+
+That opens a terminal for sudo and allows the current LAN CIDR to TCP
+`14318-14323` and UDP `5353`. Confirm with:
+
+```sh
+journalctl -k -n 50 | grep 'UFW BLOCK' | grep -E '14321|14318'
+```
+
+After ports are open:
+
+1. **Settings → Cluster → Leave** on every machine in the attempt.
+2. Fully quit and reopen PAIR on macOS if it sat unclustered.
+3. One invite, keep the PIN visible until Cluster lists the peer.
+4. Do not reuse a PIN from a canceled invite (each Add node mints a new cluster id).
+
+PAIR pairing does **not** require Ollama, a model, or an NVIDIA GPU.
 
 ## Checks
 

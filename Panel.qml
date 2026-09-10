@@ -24,6 +24,8 @@ Panel {
   property string pairLatest: ""
   property string pairMessage: "Checking NVIDIA PAIR…"
   property string pairGpuNote: ""
+  property string pairPairingNote: ""
+  property bool pairFirewallBlocked: false
   property string pairOllama: "http://127.0.0.1:11434"
   property string pairOpenai: "http://127.0.0.1:1234"
   property string progressText: ""
@@ -82,6 +84,8 @@ Panel {
     root.pairLatest = String(next.latestVersion || "")
     root.pairMessage = String(next.message || "")
     root.pairGpuNote = String(next.gpuNote || "")
+    root.pairPairingNote = String(next.pairingNote || "")
+    root.pairFirewallBlocked = next.firewallBlocked === true
     root.pairOllama = String(next.endpoints && next.endpoints.ollama ? next.endpoints.ollama : root.pairOllama)
     root.pairOpenai = String(next.endpoints && next.endpoints.openai ? next.endpoints.openai : root.pairOpenai)
     if (next.ok) root.lastError = ""
@@ -125,6 +129,7 @@ Panel {
 
   function activateCursor() {
     if (root.focusAction === "update") runUpdate()
+    else if (root.focusAction === "firewall") runCtl(["firewall"])
     else runPrimary()
   }
 
@@ -141,6 +146,7 @@ Panel {
     function install(): void { root.runCtl(["install"]) }
     function update(): void { root.runCtl(["update"]) }
     function launch(): void { root.runCtl(["launch"]) }
+    function firewall(): void { root.runCtl(["firewall"]) }
     function open(): void { root.open() }
     function close(): void { root.close() }
     function show(): void { root.open() }
@@ -239,8 +245,11 @@ Panel {
           root.cursorActive = true
           return
         }
-        if (dy !== 0 || dx !== 0)
-          root.focusAction = root.focusAction === "primary" ? "update" : "primary"
+        if (dy !== 0 || dx !== 0) {
+          if (root.focusAction === "primary") root.focusAction = "update"
+          else if (root.focusAction === "update") root.focusAction = "firewall"
+          else root.focusAction = "primary"
+        }
       }
       onActivateRequested: if (root.cursorActive) root.activateCursor()
       onCloseRequested: root.close()
@@ -286,6 +295,39 @@ Panel {
           font.family: root.contentFontFamily
           font.pixelSize: Style.font.caption
           wrapMode: Text.WordWrap
+        }
+
+        Column {
+          width: parent.width
+          visible: root.pairInstalled
+          spacing: Style.space(6)
+
+          Text {
+            text: "KNOWN ISSUES"
+            color: Qt.darker(root.contentForeground, 1.45)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            font.letterSpacing: 1.2
+          }
+
+          Text {
+            width: parent.width
+            text: "Omarchy ufw drops inbound PAIR. If another PC never shows a PIN on this machine, or pairing closes with “already in another cluster”, allow LAN TCP 14318–14323 and UDP 5353."
+            color: Qt.darker(root.contentForeground, 1.4)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
+          Text {
+            width: parent.width
+            text: "Leave cluster on both machines first. Keep one PIN open until the peer appears. Pairing does not need a local LLM."
+            color: Qt.darker(root.contentForeground, 1.4)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
         }
 
         Column {
@@ -355,6 +397,25 @@ Panel {
             if (isHovered) {
               root.cursorActive = true
               root.focusAction = "update"
+            }
+          }
+        }
+
+        Button {
+          width: parent.width
+          visible: root.pairInstalled
+          text: root.pairFirewallBlocked ? "Allow PAIR on LAN" : "Check PAIR firewall"
+          iconText: "󰦝"
+          enabled: !root.busy
+          hasCursor: root.cursorActive && root.focusAction === "firewall"
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          bordered: true
+          onClicked: root.runCtl(["firewall"])
+          onHovered: function(isHovered) {
+            if (isHovered) {
+              root.cursorActive = true
+              root.focusAction = "firewall"
             }
           }
         }
