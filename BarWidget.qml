@@ -35,9 +35,12 @@ BarWidget {
   property string focusAction: "primary"
   property bool cursorActive: false
   property bool trayHidden: false
+  property var pairNodes: []
+  property bool showKnownIssues: false
 
   readonly property bool busy: actionProc.running
   readonly property bool pairReady: pairRunning || pairInstalled
+  readonly property int pairNodeCount: pairNodes && pairNodes.length ? pairNodes.length : 0
   readonly property var updater: Model.updateAction({ updateAvailable: pairUpdateAvailable, latestVersion: pairLatest }, busy)
   readonly property string heroMeta: {
     if (pairRunning && pairVersion) return "PAIR " + pairVersion.toUpperCase()
@@ -45,7 +48,12 @@ BarWidget {
     if (pairInstalled) return "INSTALLED"
     return "NOT INSTALLED"
   }
-  readonly property string heroDetail: pairRunning ? "RUNNING" : (pairInstalled ? "IDLE" : "")
+  readonly property string heroDetail: {
+    if (pairNodeCount > 0) return (pairRunning ? "RUNNING" : "CLUSTER") + " · " + pairNodeCount + (pairNodeCount === 1 ? " NODE" : " NODES")
+    if (pairRunning) return "RUNNING"
+    if (pairInstalled) return "IDLE"
+    return ""
+  }
   readonly property string primaryLabel: {
     if (busy && focusAction === "primary") return "Working…"
     if (pairRunning) return "Open PAIR"
@@ -56,7 +64,8 @@ BarWidget {
   readonly property string tooltipText: {
     if (busy) return "NVIDIA PAIR — " + (progressText !== "" ? progressText : "working")
     if (pairUpdateAvailable) return "NVIDIA PAIR — update " + pairLatest + " available"
-    if (pairRunning) return "PAIR — open app (right-click for install/update/firewall)"
+    if (pairRunning && pairNodeCount > 0) return "PAIR — " + pairNodeCount + (pairNodeCount === 1 ? " node" : " nodes") + " (right-click for cluster)"
+    if (pairRunning) return "PAIR — open app (right-click for cluster/install/update)"
     if (pairInstalled) return "PAIR — launch NVIDIA PAIR"
     return "PAIR — install NVIDIA PAIR"
   }
@@ -221,9 +230,29 @@ BarWidget {
     else root.refresh(true)
   }
 
+  function applyCluster(text) {
+    var nodes = Model.parseNodes(text)
+    if (nodes) root.pairNodes = nodes
+  }
+
+  function refreshCluster() {
+    if (!clusterProc.running) clusterProc.running = true
+  }
+
+  function toggleKnownIssues() {
+    root.showKnownIssues = !root.showKnownIssues
+  }
+
+  function cycleFocusAction() {
+    var order = ["primary", "update", "firewall", "issues"]
+    var i = order.indexOf(root.focusAction)
+    root.focusAction = order[(i < 0 ? 0 : i + 1) % order.length]
+  }
+
   function activateCursor() {
     if (root.focusAction === "update") root.runUpdate()
     else if (root.focusAction === "firewall") root.runCtl(["firewall"])
+    else if (root.focusAction === "issues") root.toggleKnownIssues()
     else root.runPrimary()
   }
 
@@ -239,6 +268,7 @@ BarWidget {
     root.probe()
     root.hideTray()
     root.refresh(false)
+    root.refreshCluster()
   }
 
   Process {
@@ -256,6 +286,23 @@ BarWidget {
     repeat: true
     triggeredOnStart: true
     onTriggered: root.probe()
+  }
+
+  Timer {
+    interval: 8000
+    running: true
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.refreshCluster()
+  }
+
+  Process {
+    id: clusterProc
+    command: ["/usr/bin/bash", root.ctlPath, "cluster"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.applyCluster(text)
+    }
   }
 
   Process {
@@ -363,9 +410,16 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.pairIcon
+    text: ""
     dimmed: root.busy || !root.pairReady
     tooltipText: root.tooltipText
+    iconComponent: Component {
+      PairIcon {
+        anchors.fill: parent
+        fallbackColor: button.foreground
+        fallbackFontFamily: button.fontFamily
+      }
+    }
     onPressed: function(b) {
       if (b === Qt.RightButton) root.togglePanel()
       else if (b === Qt.MiddleButton) root.runUpdate()

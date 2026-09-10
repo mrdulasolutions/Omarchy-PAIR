@@ -3,7 +3,7 @@ function emptyStatus() {
     ok: true,
     error: "",
     pluginId: "io.github.mrdulasolutions.pair",
-    pluginVersion: "1.2.1",
+    pluginVersion: "1.2.2",
     installed: false,
     running: false,
     pairVersion: "",
@@ -78,4 +78,51 @@ function updateAction(status, busy) {
   if (status && status.updateAvailable)
     return { id: "update", label: "Update PAIR to " + status.latestVersion, icon: "󰚰" }
   return { id: "check", label: "Check for PAIR updates", icon: "󰑓" }
+}
+
+function parseNodes(text) {
+  var raw = String(text || "").replace(/^\uFEFF/, "").trim()
+  var start = raw.indexOf("[")
+  var end = raw.lastIndexOf("]")
+  if (start < 0 || end < start) return []
+  try {
+    var data = JSON.parse(raw.slice(start, end + 1))
+    if (!data || typeof data.length !== "number") return []
+    var nodes = []
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i]
+      if (!row || typeof row !== "object") continue
+      nodes.push({
+        name: String(row.name || row.id || "node"),
+        ip: String(row.ip || row.ipAddress || ""),
+        uuid: String(row.uuid || row.nodeUuid || ""),
+        gpu: String(row.gpu || ""),
+        local: row.local === true,
+        online: row.online === true
+      })
+    }
+    return nodes
+  } catch (e) {
+    return []
+  }
+}
+
+function nodeTitle(node) {
+  if (!node || !node.name) return "NODE"
+  return String(node.name).toUpperCase()
+}
+
+function nodeMeta(node) {
+  if (!node) return ""
+  if (node.local) return "LOCAL"
+  if (node.online) return "ONLINE"
+  return "OFFLINE"
+}
+
+function nodeDetail(node) {
+  if (!node) return ""
+  var parts = []
+  if (node.ip) parts.push(node.ip)
+  if (node.gpu) parts.push(node.gpu)
+  return parts.join("  ·  ")
 }

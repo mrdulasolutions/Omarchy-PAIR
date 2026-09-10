@@ -37,12 +37,13 @@ This plugin is the **only** PAIR control in the Omarchy bar. NVIDIA’s Electron
 | Action | What it does |
 | --- | --- |
 | Left click | Open / focus the PAIR app (or the helper panel if PAIR is not installed) |
-| Right-click | Helper panel: install, update, firewall |
+| Right-click | Helper panel: cluster, install, update, firewall, known issues |
 | Middle-click | Check GitHub for a newer PAIR app, or update it |
 | **Install NVIDIA PAIR** | Download the latest NVIDIA release and unpack it into `~/.local/opt/PAIR` |
 | **Launch / Open PAIR** | Start the desktop app, or focus it if it is already running |
 | **Check for PAIR updates** | Ask GitHub for the latest `NVIDIA/Personal-AI-Router` release |
 | **Update PAIR to …** | Replace the installed app with that newer release |
+| **Known issues** | Pairing / ufw notes (hidden until you open this button) |
 | Escape | Close the panel |
 
 After PAIR is running, local apps should talk to:
@@ -225,8 +226,9 @@ omarchy-shell shell summon io.github.mrdulasolutions.pair '{}'
 | File | Role |
 | --- | --- |
 | `manifest.json` | Plugin contract |
-| `BarWidget.qml` | Bar chip: live `pgrep`/`test` status, left-click opens PAIR |
-| `Panel.qml` | Right-click helper: install, update, firewall |
+| `BarWidget.qml` | Bar chip: official PAIR icon, live status, left-click opens PAIR |
+| `Panel.qml` | Right-click helper: cluster nodes, install, update, firewall, known issues |
+| `nvpair.png` | Official NVIDIA PAIR icon used in the bar |
 | `Model.js` | Status JSON helpers |
 | `scripts/pair-ctl` | Install / update / launch NVIDIA PAIR |
 | `AGENTS.md` | Instructions for coding agents |

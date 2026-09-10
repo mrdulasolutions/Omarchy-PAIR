@@ -34,6 +34,8 @@ Panel {
   readonly property string primaryIcon: host && host.primaryIcon ? host.primaryIcon : "󰇚"
   readonly property string statusText: host && host.statusText ? host.statusText : "Checking NVIDIA PAIR…"
   readonly property var updater: host && host.updater ? host.updater : Model.updateAction({}, false)
+  readonly property var pairNodes: host && host.pairNodes ? host.pairNodes : []
+  readonly property bool showKnownIssues: host ? host.showKnownIssues === true : false
 
   readonly property string focusAction: host && host.focusAction ? host.focusAction : "primary"
   readonly property bool cursorActive: host ? host.cursorActive === true : false
@@ -46,6 +48,7 @@ Panel {
     root.controller.show()
     if (host && typeof host.refresh === "function") host.refresh(true)
     if (host && typeof host.probe === "function") host.probe()
+    if (host && typeof host.refreshCluster === "function") host.refreshCluster()
   }
 
   function close() {
@@ -79,6 +82,10 @@ Panel {
     if (host && typeof host.runCtl === "function") host.runCtl(["firewall"])
   }
 
+  function toggleKnownIssues() {
+    if (host && typeof host.toggleKnownIssues === "function") host.toggleKnownIssues()
+  }
+
   function activateCursor() {
     if (host && typeof host.activateCursor === "function") host.activateCursor()
   }
@@ -102,10 +109,7 @@ Panel {
           return
         }
         if (dy !== 0 || dx !== 0) {
-          var next = "primary"
-          if (root.focusAction === "primary") next = "update"
-          else if (root.focusAction === "update") next = "firewall"
-          root.setHost("focusAction", next)
+          if (host && typeof host.cycleFocusAction === "function") host.cycleFocusAction()
         }
       }
       onActivateRequested: if (root.cursorActive) root.activateCursor()
@@ -126,11 +130,10 @@ Panel {
           foreground: root.contentForeground
           fontFamily: root.contentFontFamily
           iconComponent: Component {
-            Text {
-              text: root.pairIcon
-              color: root.contentForeground
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.display
+            PairIcon {
+              iconSize: Style.font.display
+              fallbackColor: root.contentForeground
+              fallbackFontFamily: root.contentFontFamily
             }
           }
         }
@@ -146,7 +149,7 @@ Panel {
 
         Text {
           width: parent.width
-          visible: root.pairGpuNote !== ""
+          visible: root.pairGpuNote !== "" && root.pairNodes.length === 0
           text: root.pairGpuNote
           color: Qt.darker(root.contentForeground, 1.4)
           font.family: root.contentFontFamily
@@ -156,11 +159,11 @@ Panel {
 
         Column {
           width: parent.width
-          visible: true
-          spacing: Style.space(6)
+          visible: root.pairNodes.length > 0
+          spacing: Style.space(8)
 
           Text {
-            text: "KNOWN ISSUES"
+            text: "CLUSTER"
             color: Qt.darker(root.contentForeground, 1.45)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.caption
@@ -168,23 +171,62 @@ Panel {
             font.letterSpacing: 1.2
           }
 
-          Text {
-            width: parent.width
-            text: "Omarchy ufw drops inbound PAIR. If another PC never shows a PIN on this machine, or pairing closes with “already in another cluster”, allow LAN TCP 14318–14323 and UDP 5353."
-            color: Qt.darker(root.contentForeground, 1.4)
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.caption
-            wrapMode: Text.WordWrap
-          }
+          Repeater {
+            model: root.pairNodes.length
 
-          Text {
-            width: parent.width
-            text: "Leave cluster on both machines first. Keep one PIN open until the peer appears. Pairing does not need a local LLM."
-            color: Qt.darker(root.contentForeground, 1.4)
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.caption
-            wrapMode: Text.WordWrap
+            Column {
+              id: nodeBlock
+              required property int index
+              width: column.width
+              spacing: Style.space(2)
+              readonly property var node: root.pairNodes[index] || ({})
+
+              Row {
+                width: parent.width
+                spacing: Style.space(8)
+
+                Text {
+                  text: Model.nodeTitle(nodeBlock.node)
+                  color: root.contentForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.body
+                  font.bold: true
+                  elide: Text.ElideRight
+                  width: parent.width - badge.implicitWidth - Style.space(8)
+                }
+
+                Text {
+                  id: badge
+                  text: Model.nodeMeta(nodeBlock.node)
+                  color: Qt.darker(root.contentForeground, 1.35)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                  font.letterSpacing: 1.1
+                }
+              }
+
+              Text {
+                width: parent.width
+                visible: Model.nodeDetail(nodeBlock.node) !== ""
+                text: Model.nodeDetail(nodeBlock.node)
+                color: Qt.darker(root.contentForeground, 1.4)
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.WordWrap
+              }
+            }
           }
+        }
+
+        Text {
+          width: parent.width
+          visible: root.pairReady && root.pairNodes.length === 0
+          text: "No cluster members yet. Open PAIR and add a node with the PIN."
+          color: Qt.darker(root.contentForeground, 1.4)
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
         }
 
         Column {
@@ -274,6 +316,48 @@ Panel {
               root.setHost("cursorActive", true)
               root.setHost("focusAction", "firewall")
             }
+          }
+        }
+
+        Button {
+          width: parent.width
+          text: root.showKnownIssues ? "Hide known issues" : "Known issues"
+          iconText: "󰋼"
+          enabled: true
+          hasCursor: root.cursorActive && root.focusAction === "issues"
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          bordered: true
+          onClicked: root.toggleKnownIssues()
+          onHovered: function(isHovered) {
+            if (isHovered) {
+              root.setHost("cursorActive", true)
+              root.setHost("focusAction", "issues")
+            }
+          }
+        }
+
+        Column {
+          width: parent.width
+          visible: root.showKnownIssues
+          spacing: Style.space(6)
+
+          Text {
+            width: parent.width
+            text: "Omarchy ufw drops inbound PAIR. If another PC never shows a PIN on this machine, or pairing closes with “already in another cluster”, allow LAN TCP 14318–14323 and UDP 5353."
+            color: Qt.darker(root.contentForeground, 1.4)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
+          Text {
+            width: parent.width
+            text: "Leave cluster on both machines first. Keep one PIN open until the peer appears. Pairing does not need a local LLM."
+            color: Qt.darker(root.contentForeground, 1.4)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
           }
         }
       }

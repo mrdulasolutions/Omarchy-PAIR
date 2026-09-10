@@ -76,6 +76,7 @@ $pair-ctl update                 # install latest if newer
 $pair-ctl launch                 # desktop app
 $pair-ctl stop
 $pair-ctl firewall               # sudo: allow LAN PAIR ports in ufw
+$pair-ctl cluster                # JSON array of cluster members
 $pair-ctl uninstall              # keep ~/.config PAIR data
 $pair-ctl uninstall --purge      # also wipe PAIR cluster identity
 ```
@@ -96,9 +97,11 @@ Do **not** edit `/usr/share/omarchy/`.
 ## After install, tell the user
 
 - This plugin is the only PAIR chip (`BarWidget.qml`). It hides NVIDIA’s Electron tray icon (`pair-ctl hide-tray`) because that tray popup closes when you leave the Omarchy bar.
+- The bar icon is official `nvpair.png`, not a Nerd Font stand-in.
 - Left-click must open/focus the live PAIR window (`omarchy-hyprland-focus-app nvpair` or `nvpair-desktop`). Do not route that through `pair-ctl` JSON.
 - Chip installed/running state comes from `pgrep -x nvpair` and `test -x ~/.local/opt/PAIR/nvpair`, not from QML FileView of status.json.
-- Right-click opens the helper panel (`Panel.qml`) for install / update / firewall.
+- Cluster members come from `pair-ctl cluster` (`cluster/members.json` plus `http://<ip>:14318/v1/node-info`).
+- Right-click opens the helper panel (`Panel.qml`) for cluster, install / update / firewall, and a Known issues button.
 - PAIR window: first-run can install Ollama (default) or LM Studio.
 - Apps should use `http://127.0.0.1:11434` (Ollama) or `http://127.0.0.1:1234` (OpenAI).
 - Pairing other PCs uses a six-digit PIN on the same LAN.

@@ -17,7 +17,7 @@ fi
 { printf '%s %s\n' "$(date -Is)" "$*"; } >>"${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair/ctl.log" 2>/dev/null || true
 
 PLUGIN_ID="io.github.mrdulasolutions.pair"
-PLUGIN_VERSION="1.2.1"
+PLUGIN_VERSION="1.2.2"
 UPSTREAM_REPO="NVIDIA/Personal-AI-Router"
 INSTALL_ROOT="${PAIR_HOME:-$HOME/.local/opt/PAIR}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair"
@@ -42,6 +42,7 @@ Usage: pair-ctl <command>
   stop                      Ask the PAIR desktop app to quit
   firewall                  Open PAIR LAN ports in ufw (needs sudo)
   hide-tray                 Hide NVIDIA PAIR's tray icon so only this helper remains
+  cluster                   Print JSON array of cluster members (name, ip, online, gpu)
 
 Omarchy is Arch-based. Do not apt-install the NVIDIA .deb.
 Do not use PAIR's in-app updater on Omarchy; it expects Debian.
@@ -659,6 +660,70 @@ cmd_status() {
   emit_json "$check"
 }
 
+local_lan_ip() {
+  ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1
+}
+
+cmd_cluster() {
+  local root="$HOME/.config/Nvidia Corporation/Personal AI Router"
+  local members="$root/cluster/members.json"
+  local idfile="$root/node-id.json"
+  if [[ ! -f $members ]]; then
+    printf '%s\n' '[]'
+    return 0
+  fi
+  local local_uuid lan
+  local_uuid=""
+  [[ -f $idfile ]] && local_uuid=$(jq -r '.node_uuid // empty' "$idfile" 2>/dev/null || true)
+  lan=$(local_lan_ip)
+  python3 - "$members" "${local_uuid:-}" "${lan:-}" <<'PY'
+import json, sys, urllib.request
+
+members_path, local_uuid, lan = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    members = json.loads(open(members_path, encoding="utf-8").read())
+except Exception:
+    print("[]")
+    raise SystemExit(0)
+if not isinstance(members, list):
+    print("[]")
+    raise SystemExit(0)
+
+nodes = []
+for member in members:
+    if not isinstance(member, dict):
+        continue
+    uuid = str(member.get("nodeUuid") or "")
+    name = str(member.get("name") or member.get("id") or "node")
+    ip = str(member.get("ipAddress") or "")
+    is_local = bool(local_uuid) and uuid == local_uuid
+    probe_ip = "127.0.0.1" if is_local else ip
+    display_ip = lan if is_local and lan else ip
+    gpu = ""
+    online = False
+    if probe_ip:
+        try:
+            with urllib.request.urlopen(f"http://{probe_ip}:14318/v1/node-info", timeout=0.5) as resp:
+                data = json.loads(resp.read().decode())
+            online = True
+            gpus = data.get("GPUs") or []
+            if gpus and isinstance(gpus[0], dict):
+                gpu = str(gpus[0].get("name") or "")
+        except Exception:
+            pass
+    nodes.append({
+        "name": name,
+        "ip": display_ip,
+        "uuid": uuid,
+        "gpu": gpu,
+        "local": is_local,
+        "online": online,
+    })
+nodes.sort(key=lambda n: (not n["local"], n["name"].lower()))
+print(json.dumps(nodes, separators=(",", ":")))
+PY
+}
+
 main() {
   local cmd="${1:-}"
   shift || true
@@ -671,6 +736,7 @@ main() {
     stop) cmd_stop "$@" ;;
     firewall) cmd_firewall "$@" ;;
     hide-tray) cmd_hide_tray "$@" ;;
+    cluster) cmd_cluster "$@" ;;
     -h | --help | help | "") usage ;;
     *) die "unknown command: $cmd" ;;
   esac
