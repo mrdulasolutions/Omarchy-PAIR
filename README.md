@@ -97,12 +97,12 @@ Use this plugin instead:
 
 or click **Update PAIR** in the panel.
 
-`pair-ctl update` downloads the latest GitHub release, stops PAIR if it is running, replaces `~/.local/opt/PAIR`, and rewrites the desktop launchers.
+`pair-ctl install` / `update` only fetch the `.deb` listed in `releases.lock.json` (exact GitHub release URL, size, and SHA-256). A newer NVIDIA tag is reported by **Check for PAIR updates** but is not installed until this plugin is updated with a reviewed hash.
 
-To install a specific NVIDIA tag:
+To install the pinned NVIDIA tag:
 
 ```sh
-~/.config/omarchy/plugins/io.github.mrdulasolutions.pair/scripts/pair-ctl install --version v0.1.1
+~/.config/omarchy/plugins/io.github.mrdulasolutions.pair/scripts/pair-ctl install
 ```
 
 ## What this plugin installs
@@ -238,6 +238,7 @@ omarchy-shell shell summon io.github.mrdulasolutions.pair '{}'
 | `nvpair.png` | Official NVIDIA PAIR icon used in the bar |
 | `Model.js` | Status JSON helpers |
 | `scripts/pair-ctl` | Install / update / launch NVIDIA PAIR |
+| `releases.lock.json` | Pinned NVIDIA `.deb` URLs, sizes, and SHA-256 digests |
 | `bar.png` | Top-bar screenshot |
 | `NOTICE` | NVIDIA PAIR icon attribution |
 
@@ -250,7 +251,7 @@ List it from the [plugin submit form](https://github.com/omacom/omarchy-plugin-m
 - Repository: `https://github.com/mrdulasolutions/Omarchy-PAIR.git`
 - Category: **System**
 - Tags (max three): **AI**, **Bar**, **System**
-- Notes: user-local installer for NVIDIA PAIR from GitHub (`~/.local/opt/PAIR`). `pair-ctl firewall` is the only sudo path (visible terminal, LAN PAIR ports). Hiding NVIDIA’s tray icon writes `omarchy.tray.hidden` in `shell.json` only after you click the chip or open the panel. Does not edit Hyprland config. `nvpair.png` is NVIDIA’s app icon (see NOTICE).
+- Notes: user-local installer for NVIDIA PAIR. Installs only the `.deb` pinned in `releases.lock.json` (SHA-256 checked, archive members validated) into `~/.local/opt/PAIR`. `PAIR_HOME` is ignored. `pair-ctl firewall` is the only sudo path (visible terminal, LAN PAIR ports). Hiding NVIDIA’s tray icon writes `omarchy.tray.hidden` in `shell.json` only after you click the chip or open the panel. Does not edit Hyprland config. `nvpair.png` is NVIDIA’s app icon (see NOTICE).
 
 ## License
 

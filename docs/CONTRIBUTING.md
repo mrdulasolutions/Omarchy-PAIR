@@ -26,6 +26,9 @@ omarchy-shell shell rescanPlugins
 `pair-ctl firewall` is the only command that needs sudo. It opens a
 visible terminal and allows LAN TCP 14318–14323 and UDP 5353.
 
+Install only uses artifacts in `releases.lock.json`. To ship a newer NVIDIA
+`.deb`, add its tag, URL, size, and SHA-256 to that file in a new commit.
+
 ## Do not
 
 - Edit `/usr/share/omarchy/` or write to `/opt/PAIR`

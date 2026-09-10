@@ -11,7 +11,7 @@ function emptyStatus() {
     ok: true,
     error: "",
     pluginId: "io.github.mrdulasolutions.pair",
-    pluginVersion: "0.0.1",
+    pluginVersion: "0.0.2",
     installed: false,
     running: false,
     pairVersion: "",

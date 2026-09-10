@@ -13,14 +13,16 @@ if [[ -z ${HOME:-} || $HOME == / ]]; then
   HOME=$(getent passwd "$(id -u)" | cut -d: -f6)
   export HOME
 fi
-# debug: prove the panel actually spawned us
-{ printf '%s %s\n' "$(date -Is)" "$*"; } >>"${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair/ctl.log" 2>/dev/null || true
+unset PAIR_HOME || true
 
 PLUGIN_ID="io.github.mrdulasolutions.pair"
-PLUGIN_VERSION="0.0.1"
+PLUGIN_VERSION="0.0.2"
 UPSTREAM_REPO="NVIDIA/Personal-AI-Router"
-INSTALL_ROOT="${PAIR_HOME:-$HOME/.local/opt/PAIR}"
-STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair"
+SCRIPT_DIR=$(cd "$(dirname -- "$0")" && pwd)
+PLUGIN_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+LOCKFILE="$PLUGIN_ROOT/releases.lock.json"
+INSTALL_ROOT="$HOME/.local/opt/PAIR"
+STATE_DIR="$HOME/.local/state/omarchy-pair"
 STATE_FILE="$STATE_DIR/installed.json"
 STATUS_JSON="$STATE_DIR/status.json"
 LATEST_CACHE="$STATE_DIR/latest.json"
@@ -35,8 +37,8 @@ usage() {
 Usage: pair-ctl <command>
 
   status [--check-latest]   Print JSON describing this machine (forces a GitHub lookup)
-  install [--version TAG]   Download NVIDIA PAIR and install it user-locally
-  update                    Install the latest NVIDIA PAIR release
+  install                   Download the pinned NVIDIA PAIR .deb and install it
+  update                    Install the pinned NVIDIA PAIR release if missing/older
   uninstall [--purge]       Remove the app (keep cluster data unless --purge)
   launch                    Start the PAIR desktop app
   stop                      Ask the PAIR desktop app to quit
@@ -72,6 +74,77 @@ arch_deb() {
   esac
 }
 
+require_user_dir() {
+  local p="$1"
+  [[ -n $p ]] || die "empty path"
+  if [[ -L $p ]]; then
+    die "refusing symlink path: $p"
+  fi
+  if [[ -e $p && ! -d $p ]]; then
+    die "not a directory: $p"
+  fi
+}
+
+ensure_private_dir() {
+  local p="$1"
+  mkdir -p -m 700 "$p"
+  require_user_dir "$p"
+  local uid
+  uid=$(stat -c '%u' "$p")
+  [[ $uid == "$(id -u)" ]] || die "directory not owned by current user: $p"
+}
+
+atomic_write() {
+  local dest="$1"
+  local dir t
+  dir=$(dirname -- "$dest")
+  ensure_private_dir "$dir"
+  umask 077
+  t=$(mktemp -p "$dir" .tmp.XXXXXXXXXX)
+  cat >"$t"
+  mv -f -T -- "$t" "$dest"
+}
+
+require_install_root() {
+  [[ $INSTALL_ROOT == "$HOME/.local/opt/PAIR" ]] || die "refusing install path $INSTALL_ROOT"
+  if [[ -e $INSTALL_ROOT || -L $INSTALL_ROOT ]]; then
+    [[ ! -L $INSTALL_ROOT ]] || die "install path is a symlink"
+    [[ -d $INSTALL_ROOT ]] || die "install path is not a directory"
+    local uid
+    uid=$(stat -c '%u' "$INSTALL_ROOT")
+    [[ $uid == "$(id -u)" ]] || die "install path not owned by current user"
+  fi
+}
+
+remove_install_root() {
+  require_install_root
+  [[ -e $INSTALL_ROOT ]] || return 0
+  if [[ ! -e $INSTALL_ROOT/.omarchy-pair-version && ! -x $INSTALL_ROOT/nvpair ]]; then
+    die "refusing to delete unrecognized directory $INSTALL_ROOT"
+  fi
+  rm -rf -- "$INSTALL_ROOT"
+}
+
+pinned_release() {
+  local arch="$1"
+  local want="${2:-}"
+  [[ -f $LOCKFILE && ! -L $LOCKFILE ]] || return 1
+  /usr/bin/jq -c --arg arch "$arch" --arg tag "$want" '
+    .releases[]
+    | select(.arch == $arch)
+    | select(($tag == "") or (.tag == $tag) or (.version == $tag))
+  ' "$LOCKFILE" | /usr/bin/head -n1
+}
+
+github_latest_tag() {
+  local json
+  json=$(/usr/bin/curl -q --fail -sS --proto =https --proto-redir =https \
+    -A "$USER_AGENT" --max-time 20 --max-filesize 1048576 -- "$API_URL" \
+    | /usr/bin/head -c 1048577) || return 1
+  [[ ${#json} -le 1048576 ]] || return 1
+  /usr/bin/jq -r '.tag_name // empty' <<<"$json"
+}
+
 pair_running() {
   pgrep -f "$HOME/.local/opt/PAIR/nvpair( |$)" >/dev/null 2>&1 \
     || pgrep -x nvpair >/dev/null 2>&1
@@ -94,54 +167,6 @@ pair_binary_present() {
   [[ -x $INSTALL_ROOT/nvpair ]]
 }
 
-read_cached_latest() {
-  [[ -f $LATEST_CACHE ]] || return 1
-  local age
-  age=$(($(date +%s) - $(stat -c %Y "$LATEST_CACHE" 2>/dev/null || echo 0)))
-  ((age >= 0 && age < 3600)) || return 1
-  jq -e '.tag and .version and .debUrl' "$LATEST_CACHE" >/dev/null 2>&1
-}
-
-fetch_latest() {
-  local force="${1:-0}"
-  if ((force == 0)) && read_cached_latest; then
-    return 0
-  fi
-  mkdir -p "$STATE_DIR"
-  local json
-  json=$(/usr/bin/curl -q --fail -sS --proto =https --proto-redir =https \
-    -A "$USER_AGENT" --max-time 20 --max-filesize 1048576 -- "$API_URL" \
-    | /usr/bin/head -c 1048577) || {
-    log "could not reach GitHub releases for $UPSTREAM_REPO"
-    return 1
-  }
-  [[ ${#json} -le 1048576 ]] || { log "GitHub release metadata exceeded size cap"; return 1; }
-  local arch tag version name url
-  arch=$(arch_deb)
-  tag=$(jq -r '.tag_name // empty' <<<"$json")
-  [[ -n $tag ]] || { log "GitHub latest release has no tag_name"; return 1; }
-  version="${tag#v}"
-  name=$(jq -r --arg arch "$arch" '
-    .assets[]
-    | select(.name | test("NVPAIR-Setup-.*-" + $arch + "\\.deb$"))
-    | .name
-  ' <<<"$json" | head -n1)
-  url=$(jq -r --arg arch "$arch" '
-    .assets[]
-    | select(.name | test("NVPAIR-Setup-.*-" + $arch + "\\.deb$"))
-    | .browser_download_url
-  ' <<<"$json" | head -n1)
-  [[ -n $url && -n $name ]] || { log "no NVPAIR-Setup-*-${arch}.deb on the latest GitHub release"; return 1; }
-  jq -n \
-    --arg tag "$tag" \
-    --arg version "$version" \
-    --arg arch "$arch" \
-    --arg name "$name" \
-    --arg debUrl "$url" \
-    '{tag:$tag, version:$version, arch:$arch, name:$name, debUrl:$debUrl, fetchedAt:(now|todateiso8601)}' \
-    >"$LATEST_CACHE"
-}
-
 version_gt() {
   local a="$1" b="$2"
   [[ -n $a && -n $b && $a != "$b" ]] || return 1
@@ -149,20 +174,21 @@ version_gt() {
 }
 
 write_wrappers() {
-  mkdir -p "$BIN_DIR" "$DESKTOP_DIR"
-  cat >"$BIN_DIR/nvpair" <<EOF
+  ensure_private_dir "$BIN_DIR"
+  ensure_private_dir "$DESKTOP_DIR"
+  atomic_write "$BIN_DIR/nvpair" <<EOF
 #!/bin/sh
 # NVIDIA Personal AI Router terminal UI (matches the official Debian wrapper).
 # Do not run this while the desktop app is open.
 exec "$INSTALL_ROOT/resources/cli-bin/nvpair-tui" "\$@"
 EOF
-  cat >"$BIN_DIR/nvpair-desktop" <<EOF
+  atomic_write "$BIN_DIR/nvpair-desktop" <<EOF
 #!/bin/sh
 # NVIDIA Personal AI Router desktop application (Omarchy / Hyprland).
 exec "$INSTALL_ROOT/nvpair" --ozone-platform-hint=auto "\$@"
 EOF
   chmod 0755 "$BIN_DIR/nvpair" "$BIN_DIR/nvpair-desktop"
-  cat >"$DESKTOP_DIR/nvpair.desktop" <<EOF
+  atomic_write "$DESKTOP_DIR/nvpair.desktop" <<EOF
 [Desktop Entry]
 Name=Personal AI Router
 Exec=$BIN_DIR/nvpair-desktop %U
@@ -186,13 +212,16 @@ EOF
 
 install_icons_from() {
   local src_root="$1"
-  local sz src dest
+  local sz src dest t
   for sz in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
     src="$src_root/usr/share/icons/hicolor/$sz/apps/nvpair.png"
-    [[ -f $src ]] || continue
+    [[ -f $src && ! -L $src ]] || continue
     dest="$ICON_ROOT/$sz/apps"
-    mkdir -p "$dest"
-    cp -f "$src" "$dest/nvpair.png"
+    ensure_private_dir "$dest"
+    umask 077
+    t=$(mktemp -p "$dest" .icon.XXXXXXXXXX)
+    cp -- "$src" "$t"
+    mv -f -T -- "$t" "$dest/nvpair.png"
   done
   if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -q -t -f "$ICON_ROOT" >/dev/null 2>&1 || true
@@ -200,8 +229,8 @@ install_icons_from() {
 }
 
 write_state() {
-  mkdir -p "$STATE_DIR"
-  jq -n \
+  ensure_private_dir "$STATE_DIR"
+  /usr/bin/jq -n \
     --arg pairVersion "$1" \
     --arg tag "$2" \
     --arg arch "$3" \
@@ -218,7 +247,7 @@ write_state() {
       installedAt: (now|todateiso8601),
       pluginId: $pluginId,
       pluginVersion: $pluginVersion
-    }' >"$STATE_FILE"
+    }' | atomic_write "$STATE_FILE"
 }
 
 read_version_file() {
@@ -249,11 +278,58 @@ adopt_existing() {
   log "adopted existing PAIR at $INSTALL_ROOT (version $ver)"
 }
 
+extract_deb() {
+  local deb="$1" dest="$2"
+  mkdir -p "$dest"
+  (cd "$dest" && /usr/bin/ar x "$deb")
+  local data
+  data=$(find "$dest" -maxdepth 1 -name 'data.tar.*' -type f | head -n1)
+  [[ -n $data && -f $data && ! -L $data ]] || die "deb has no data.tar.*"
+  /usr/bin/python3 - "$data" "$dest" <<'PY'
+import os, sys, tarfile
+
+src, dest = sys.argv[1], sys.argv[2]
+wanted = []
+nvpair = False
+with tarfile.open(src, "r:*") as tf:
+    for member in tf.getmembers():
+        name = member.name.lstrip("./")
+        parts = name.split("/")
+        if name.startswith("/") or any(p == ".." for p in parts):
+            sys.exit("unsafe tar member: " + name)
+        if member.issym() or member.islnk() or member.isdev() or member.isfifo():
+            sys.exit("refusing special tar member: " + name)
+        if not (member.isfile() or member.isdir()):
+            continue
+        ok = (
+            name == "opt/PAIR"
+            or name.startswith("opt/PAIR/")
+            or name.startswith("usr/share/icons/hicolor/")
+        )
+        if not ok:
+            continue
+        member.name = name
+        wanted.append(member)
+        if name == "opt/PAIR/nvpair" and member.isfile():
+            nvpair = True
+    if not nvpair:
+        sys.exit("package did not contain opt/PAIR/nvpair")
+    kwargs = {"path": dest, "members": wanted}
+    if hasattr(tarfile, "data_filter"):
+        kwargs["filter"] = "data"
+    tf.extractall(**kwargs)
+bin_path = os.path.join(dest, "opt", "PAIR", "nvpair")
+if not os.path.isfile(bin_path) or os.path.islink(bin_path):
+    sys.exit("extracted nvpair is missing or a symlink")
+os.chmod(bin_path, 0o755)
+PY
+}
+
 cmd_install() {
   need_cmd curl
   need_cmd jq
   need_cmd ar
-  need_cmd tar
+  require_install_root
   local requested=""
   while (( $# > 0 )); do
     case "$1" in
@@ -266,21 +342,21 @@ cmd_install() {
     esac
   done
 
-  local arch tag version name url
+  local arch pin
   arch=$(arch_deb)
-  if [[ -n $requested ]]; then
-    tag="$requested"
-    [[ $tag == v* ]] || tag="v$tag"
-    version="${tag#v}"
-    name="NVPAIR-Setup-${version}-${arch}.deb"
-    url="https://github.com/${UPSTREAM_REPO}/releases/download/${tag}/${name}"
-  else
-    fetch_latest 1 || die "could not reach GitHub releases for $UPSTREAM_REPO"
-    tag=$(jq -r '.tag' "$LATEST_CACHE")
-    version=$(jq -r '.version' "$LATEST_CACHE")
-    name=$(jq -r '.name' "$LATEST_CACHE")
-    url=$(jq -r '.debUrl' "$LATEST_CACHE")
-  fi
+  pin=$(pinned_release "$arch" "$requested")
+  [[ -n $pin ]] || die "no pinned NVIDIA PAIR .deb for $arch ${requested:+tag $requested} in releases.lock.json"
+
+  local tag version name url sha size
+  tag=$(jq -r '.tag' <<<"$pin")
+  version=$(jq -r '.version' <<<"$pin")
+  name=$(jq -r '.name' <<<"$pin")
+  url=$(jq -r '.url' <<<"$pin")
+  sha=$(jq -r '.sha256' <<<"$pin")
+  size=$(jq -r '.size' <<<"$pin")
+  [[ $url == https://github.com/NVIDIA/Personal-AI-Router/releases/download/* ]] || die "pinned URL is not the NVIDIA GitHub release host"
+  [[ $sha =~ ^[a-f0-9]{64}$ ]] || die "pinned sha256 is malformed"
+  [[ $size =~ ^[0-9]+$ ]] || die "pinned size is malformed"
 
   local current
   current=$(installed_version)
@@ -297,32 +373,33 @@ cmd_install() {
     sleep 1
   fi
 
-  mkdir -p "$STATE_DIR"
+  ensure_private_dir "$STATE_DIR"
   local tmp
   tmp=$(mktemp -d "$STATE_DIR/download.XXXXXX")
   trap 'rm -rf "$tmp"' RETURN
 
   local deb="$tmp/$name"
-  log "downloading $name"
+  log "downloading pinned $name"
   /usr/bin/curl -q --fail -sS -L --proto =https --proto-redir =https \
-    -A "$USER_AGENT" --max-time 600 --max-filesize 209715200 -o "$deb" -- "$url" \
+    -A "$USER_AGENT" --max-time 600 --max-filesize "$size" -o "$deb" -- "$url" \
     || die "download failed: $url"
+  local got_size got_sha
+  got_size=$(stat -c '%s' "$deb")
+  [[ $got_size == "$size" ]] || die "downloaded size $got_size != pinned $size"
+  got_sha=$(/usr/bin/sha256sum -b "$deb" | awk '{print $1}')
+  [[ $got_sha == "$sha" ]] || die "SHA-256 mismatch (got $got_sha, pinned $sha)"
 
   log "extracting Debian package (Omarchy cannot apt-install this)"
-  mkdir -p "$tmp/extract"
-  (cd "$tmp" && ar x "$deb")
-  local data
-  data=$(ls "$tmp"/data.tar.* | head -n1)
-  [[ -n $data ]] || die "deb has no data.tar.*"
-  tar -xf "$data" -C "$tmp/extract"
-
-  [[ -x $tmp/extract/opt/PAIR/nvpair ]] || die "package did not contain /opt/PAIR/nvpair"
+  extract_deb "$deb" "$tmp/extract"
+  [[ -x $tmp/extract/opt/PAIR/nvpair && ! -L $tmp/extract/opt/PAIR/nvpair ]] \
+    || die "package did not contain a regular opt/PAIR/nvpair"
 
   log "installing into $INSTALL_ROOT"
-  mkdir -p "$(dirname "$INSTALL_ROOT")"
-  rm -rf "$INSTALL_ROOT"
-  mv "$tmp/extract/opt/PAIR" "$INSTALL_ROOT"
-  printf '%s\n' "$version" >"$INSTALL_ROOT/.omarchy-pair-version"
+  ensure_private_dir "$HOME/.local/opt"
+  remove_install_root
+  mv -- "$tmp/extract/opt/PAIR" "$INSTALL_ROOT"
+  require_install_root
+  printf '%s\n' "$version" | atomic_write "$INSTALL_ROOT/.omarchy-pair-version"
   install_icons_from "$tmp/extract"
   write_wrappers
   write_state "$version" "$tag" "$arch" "$url"
@@ -332,16 +409,6 @@ cmd_install() {
 
 cmd_update() {
   adopt_existing || true
-  fetch_latest 1 || die "could not reach GitHub releases for $UPSTREAM_REPO"
-  local latest current
-  latest=$(jq -r '.version' "$LATEST_CACHE")
-  current=$(installed_version)
-  if pair_binary_present && [[ -n $current && $current == "$latest" ]]; then
-    log "PAIR $current is already the latest GitHub release"
-    emit_status 1
-    return 0
-  fi
-  log "updating NVIDIA PAIR ${current:-none} -> $latest"
   cmd_install
 }
 
@@ -356,19 +423,28 @@ cmd_uninstall() {
     cmd_stop >/dev/null || true
     sleep 1
   fi
-  rm -rf "$INSTALL_ROOT"
-  rm -f "$BIN_DIR/nvpair" "$BIN_DIR/nvpair-desktop" "$DESKTOP_DIR/nvpair.desktop"
+  remove_install_root
+  if [[ -f $BIN_DIR/nvpair ]] && grep -q 'NVIDIA Personal AI Router terminal UI' "$BIN_DIR/nvpair" 2>/dev/null; then
+    rm -f -- "$BIN_DIR/nvpair"
+  fi
+  if [[ -f $BIN_DIR/nvpair-desktop ]] && grep -q 'NVIDIA Personal AI Router desktop application' "$BIN_DIR/nvpair-desktop" 2>/dev/null; then
+    rm -f -- "$BIN_DIR/nvpair-desktop"
+  fi
+  if [[ -f $DESKTOP_DIR/nvpair.desktop ]] && grep -q 'Personal AI Router' "$DESKTOP_DIR/nvpair.desktop" 2>/dev/null; then
+    rm -f -- "$DESKTOP_DIR/nvpair.desktop"
+  fi
   local sz
   for sz in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
-    rm -f "$ICON_ROOT/$sz/apps/nvpair.png"
+    rm -f -- "$ICON_ROOT/$sz/apps/nvpair.png"
   done
-  rm -f "$STATE_FILE"
+  rm -f -- "$STATE_FILE"
   if ((purge)); then
     log "purging PAIR cluster data (models in ~/.ollama are left alone)"
-    rm -rf "$HOME/.config/Nvidia Corporation/Personal AI Router"
-    rm -rf "$HOME/.config/NVIDIA Corporation/PAIR"
-    rmdir "$HOME/.config/Nvidia Corporation" 2>/dev/null || true
-    rmdir "$HOME/.config/NVIDIA Corporation" 2>/dev/null || true
+    local cfg="$HOME/.config/Nvidia Corporation/Personal AI Router"
+    if [[ -d $cfg && ! -L $cfg ]]; then
+      uid=$(stat -c '%u' "$cfg")
+      [[ $uid == "$(id -u)" ]] && rm -rf -- "$cfg"
+    fi
   fi
   log "removed NVIDIA PAIR"
   emit_status 1
@@ -581,21 +657,26 @@ emit_json() {
   local current latest update=false
   current=$(installed_version)
   [[ -n $current ]] || current=""
+  local pin pinned_version github_tag
+  pin=$(pinned_release "$(arch_deb)" || true)
+  pinned_version=$(jq -r '.version // empty' <<<"${pin:-{}}" 2>/dev/null || true)
+  latest="${pinned_version:-}"
   if ((check_latest)); then
     log "checking GitHub for NVIDIA PAIR updates"
-    if fetch_latest 1; then
-      latest=$(jq -r '.version // empty' "$LATEST_CACHE" 2>/dev/null || true)
+    if github_tag=$(github_latest_tag); then
+      github_tag="${github_tag#v}"
+      if [[ -n $github_tag && -n $pinned_version ]] && version_gt "$pinned_version" "$github_tag"; then
+        latest="$github_tag"
+      fi
     elif [[ -z $error ]]; then
       error="Could not reach GitHub for PAIR updates."
     fi
-  elif [[ -f $LATEST_CACHE ]]; then
-    latest=$(jq -r '.version // empty' "$LATEST_CACHE" 2>/dev/null || true)
   fi
-  latest="${latest:-}"
-  if [[ $installed == true && -n $latest && -n $current && $current != unknown ]] && version_gt "$current" "$latest"; then
+  if [[ $installed == true && -n $pinned_version && ( -z $current || $current == unknown || $current != "$pinned_version" ) ]]; then
     update=true
-  elif [[ $installed == true && -n $latest && ( -z $current || $current == unknown ) ]]; then
-    update=true
+    latest="$pinned_version"
+  elif [[ $installed != true && -n $pinned_version ]]; then
+    latest="$pinned_version"
   fi
 
   local gpu_note=""
@@ -616,9 +697,11 @@ emit_json() {
   elif [[ $installed != true ]]; then
     message="NVIDIA PAIR is not installed yet. Install it from this panel, or run scripts/pair-ctl install."
   elif [[ $update == true ]]; then
-    message="PAIR ${current:-unknown} is installed. GitHub has $latest — update the app with this panel, not the in-app updater."
-  elif ((check_latest)) && [[ -n $latest ]]; then
-    message="PAIR ${current:-unknown} is up to date (GitHub $latest)."
+    message="PAIR ${current:-unknown} is installed. Pinned release $pinned_version is available — update with this panel, not the in-app updater."
+  elif ((check_latest)) && [[ -n ${github_tag:-} && -n $pinned_version ]] && version_gt "$pinned_version" "$github_tag"; then
+    message="PAIR $pinned_version is pinned in this plugin. GitHub has $github_tag — omarchy plugin update when a new hash is reviewed."
+  elif ((check_latest)) && [[ -n $pinned_version ]]; then
+    message="PAIR ${current:-unknown} is up to date (pinned $pinned_version)."
   elif [[ $firewall_blocked == true ]]; then
     message="$pairing_note"
   elif [[ $running == true ]]; then
@@ -670,8 +753,8 @@ emit_json() {
       commands: {desktop: $desktop, tui: $tui}
     }')
   printf '%s\n' "$payload"
-  printf '%s\n' "$payload" >"$STATUS_JSON.tmp"
-  mv -f "$STATUS_JSON.tmp" "$STATUS_JSON"
+  ensure_private_dir "$STATE_DIR"
+  printf '%s\n' "$payload" | atomic_write "$STATUS_JSON"
 }
 
 emit_status() {

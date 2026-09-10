@@ -1,0 +1,24 @@
+{
+  "upstream": "NVIDIA/Personal-AI-Router",
+  "comment": "Install/update only these reviewed artifacts. A newer GitHub tag requires a plugin commit that adds its sha256.",
+  "releases": [
+    {
+      "tag": "v0.1.1",
+      "version": "0.1.1",
+      "arch": "amd64",
+      "name": "NVPAIR-Setup-0.1.1-amd64.deb",
+      "url": "https://github.com/NVIDIA/Personal-AI-Router/releases/download/v0.1.1/NVPAIR-Setup-0.1.1-amd64.deb",
+      "sha256": "879fc316b5bff9f26f05f02b40cacfff8f14c5c79a751bdd975d568b40b543ac",
+      "size": 141002628
+    },
+    {
+      "tag": "v0.1.1",
+      "version": "0.1.1",
+      "arch": "arm64",
+      "name": "NVPAIR-Setup-0.1.1-arm64.deb",
+      "url": "https://github.com/NVIDIA/Personal-AI-Router/releases/download/v0.1.1/NVPAIR-Setup-0.1.1-arm64.deb",
+      "sha256": "9f64b21c99fbd2517e3ef3ab9feec7f5aa0bcf4c338fa55846f0564148442229",
+      "size": 131769548
+    }
+  ]
+}
