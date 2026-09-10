@@ -41,7 +41,7 @@ This plugin is the **only** PAIR control in the Omarchy bar. NVIDIA’s Electron
 | Middle-click | Check GitHub for a newer PAIR app, or update it |
 | **Install NVIDIA PAIR** | Download the latest NVIDIA release and unpack it into `~/.local/opt/PAIR` |
 | **Launch / Open PAIR** | Start the desktop app, or focus it if it is already running |
-| **Check for PAIR updates** | Ask GitHub for the latest `NVIDIA/Personal-AI-Router` release |
+| **Check for PAIR updates** | Ask GitHub for the latest `NVIDIA/Personal-AI-Router` release (shows up to date, or becomes **Update PAIR to …**) |
 | **Update PAIR to …** | Replace the installed app with that newer release |
 | **Known issues** | Pairing / ufw notes (hidden until you open this button) |
 | Escape | Close the panel |

@@ -291,7 +291,11 @@ Panel {
           foreground: root.contentForeground
           fontFamily: root.contentFontFamily
           bordered: true
-          onClicked: root.runUpdate()
+          onClicked: {
+            root.setHost("cursorActive", true)
+            root.setHost("focusAction", "update")
+            root.runUpdate()
+          }
           onHovered: function(isHovered) {
             if (isHovered) {
               root.setHost("cursorActive", true)

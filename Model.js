@@ -3,7 +3,7 @@ function emptyStatus() {
     ok: true,
     error: "",
     pluginId: "io.github.mrdulasolutions.pair",
-    pluginVersion: "1.2.2",
+    pluginVersion: "1.2.3",
     installed: false,
     running: false,
     pairVersion: "",
@@ -74,7 +74,9 @@ function primaryAction(status, busy) {
 }
 
 function updateAction(status, busy) {
-  if (busy) return { id: "busy", label: "Working…", icon: "󰂓" }
+  if (busy && status && status.updateAvailable)
+    return { id: "busy", label: "Updating PAIR…", icon: "󰂓" }
+  if (busy) return { id: "busy", label: "Checking GitHub…", icon: "󰂓" }
   if (status && status.updateAvailable)
     return { id: "update", label: "Update PAIR to " + status.latestVersion, icon: "󰚰" }
   return { id: "check", label: "Check for PAIR updates", icon: "󰑓" }

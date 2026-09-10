@@ -41,7 +41,7 @@ BarWidget {
   readonly property bool busy: actionProc.running
   readonly property bool pairReady: pairRunning || pairInstalled
   readonly property int pairNodeCount: pairNodes && pairNodes.length ? pairNodes.length : 0
-  readonly property var updater: Model.updateAction({ updateAvailable: pairUpdateAvailable, latestVersion: pairLatest }, busy)
+  readonly property var updater: Model.updateAction({ updateAvailable: pairUpdateAvailable, latestVersion: pairLatest }, busy && focusAction === "update")
   readonly property string heroMeta: {
     if (pairRunning && pairVersion) return "PAIR " + pairVersion.toUpperCase()
     if (pairRunning) return "RUNNING"
@@ -226,8 +226,9 @@ BarWidget {
 
   function runUpdate() {
     if (root.busy) return
+    root.focusAction = "update"
     if (root.pairUpdateAvailable) root.runCtl(["update"])
-    else root.refresh(true)
+    else root.runCtl(["status", "--check-latest"])
   }
 
   function applyCluster(text) {
@@ -353,22 +354,26 @@ BarWidget {
       }
     }
     onExited: function(exitCode) {
-      root.applyStatus(actionOut.text)
+      var out = actionOut.text ? actionOut.text : ""
+      if (out !== "") root.applyStatus(out)
       root.progressText = ""
-      root.probe()
       if (exitCode === 0) {
         root.lastError = ""
-        if (!root.pairInstalled)
-          root.notify("NVIDIA PAIR removed", "", "low")
-        else if (root.pairRunning)
-          root.notify("NVIDIA PAIR", root.pairMessage, "low")
-        else
-          root.notify("NVIDIA PAIR " + (root.pairVersion || ""), root.pairMessage, "low")
+        var headline = "NVIDIA PAIR"
+        if (root.focusAction === "update" && !root.pairUpdateAvailable && root.pairLatest)
+          headline = "PAIR is up to date"
+        else if (root.pairUpdateAvailable)
+          headline = "PAIR update available"
+        else if (!root.pairInstalled)
+          headline = "NVIDIA PAIR removed"
+        root.notify(headline, root.pairMessage, "low")
+        root.probe()
         return
       }
       if (root.lastError === "")
         root.lastError = root.progressText !== "" ? root.progressText : "PAIR command failed."
       root.notify("NVIDIA PAIR failed", root.lastError, "critical")
+      root.probe()
     }
   }
 
@@ -396,7 +401,7 @@ BarWidget {
 
     function refresh(): void { root.refresh(true) }
     function install(): void { root.runCtl(["install"]) }
-    function update(): void { root.runCtl(["update"]) }
+    function update(): void { root.runUpdate() }
     function launch(): void { root.launchPair() }
     function firewall(): void { root.runCtl(["firewall"]) }
     function open(): void { root.open() }

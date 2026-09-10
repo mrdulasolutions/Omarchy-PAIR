@@ -17,7 +17,7 @@ fi
 { printf '%s %s\n' "$(date -Is)" "$*"; } >>"${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair/ctl.log" 2>/dev/null || true
 
 PLUGIN_ID="io.github.mrdulasolutions.pair"
-PLUGIN_VERSION="1.2.2"
+PLUGIN_VERSION="1.2.3"
 UPSTREAM_REPO="NVIDIA/Personal-AI-Router"
 INSTALL_ROOT="${PAIR_HOME:-$HOME/.local/opt/PAIR}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair"
@@ -34,7 +34,7 @@ usage() {
   cat <<'EOF'
 Usage: pair-ctl <command>
 
-  status [--check-latest]   Print JSON describing this machine
+  status [--check-latest]   Print JSON describing this machine (forces a GitHub lookup)
   install [--version TAG]   Download NVIDIA PAIR and install it user-locally
   update                    Install the latest NVIDIA PAIR release
   uninstall [--purge]       Remove the app (keep cluster data unless --purge)
@@ -559,8 +559,11 @@ emit_json() {
   current=$(installed_version)
   [[ -n $current ]] || current=""
   if ((check_latest)); then
-    if fetch_latest 0; then
+    log "checking GitHub for NVIDIA PAIR updates"
+    if fetch_latest 1; then
       latest=$(jq -r '.version // empty' "$LATEST_CACHE" 2>/dev/null || true)
+    elif [[ -z $error ]]; then
+      error="Could not reach GitHub for PAIR updates."
     fi
   elif [[ -f $LATEST_CACHE ]]; then
     latest=$(jq -r '.version // empty' "$LATEST_CACHE" 2>/dev/null || true)
@@ -589,10 +592,12 @@ emit_json() {
     message="$error"
   elif [[ $installed != true ]]; then
     message="NVIDIA PAIR is not installed yet. Install it from this panel, or run scripts/pair-ctl install."
+  elif [[ $update == true ]]; then
+    message="PAIR ${current:-unknown} is installed. GitHub has $latest — update the app with this panel, not the in-app updater."
+  elif ((check_latest)) && [[ -n $latest ]]; then
+    message="PAIR ${current:-unknown} is up to date (GitHub $latest)."
   elif [[ $firewall_blocked == true ]]; then
     message="$pairing_note"
-  elif [[ $update == true ]]; then
-    message="PAIR ${current:-unknown} is installed. GitHub has $latest — update the app with pair-ctl update, not the in-app updater."
   elif [[ $running == true ]]; then
     message="PAIR ${current:-} is installed and running."
   else
