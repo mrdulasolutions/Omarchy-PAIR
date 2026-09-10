@@ -1,3 +1,5 @@
 .DS_Store
-*.qmlc
 *.jsc
+*.pyc
+__pycache__/
+*.qmlc
