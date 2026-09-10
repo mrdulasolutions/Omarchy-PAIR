@@ -17,7 +17,7 @@ fi
 { printf '%s %s\n' "$(date -Is)" "$*"; } >>"${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair/ctl.log" 2>/dev/null || true
 
 PLUGIN_ID="io.github.mrdulasolutions.pair"
-PLUGIN_VERSION="1.2.0"
+PLUGIN_VERSION="1.2.1"
 UPSTREAM_REPO="NVIDIA/Personal-AI-Router"
 INSTALL_ROOT="${PAIR_HOME:-$HOME/.local/opt/PAIR}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pair"
@@ -457,8 +457,8 @@ cmd_launch() {
   adopt_existing || true
   pair_binary_present || die "PAIR is not installed. Run: pair-ctl install"
   if pair_running; then
-    if command -v hyprctl >/dev/null 2>&1; then
-      hyprctl dispatch focuswindow class:nvpair >/dev/null 2>&1 || true
+    if command -v omarchy-hyprland-focus-app >/dev/null 2>&1; then
+      omarchy-hyprland-focus-app nvpair >/dev/null 2>&1 || true
     fi
     log "PAIR is already running"
     cmd_hide_tray >/dev/null || true

@@ -95,7 +95,10 @@ Do **not** edit `/usr/share/omarchy/`.
 
 ## After install, tell the user
 
-- This plugin is the only PAIR chip. It hides NVIDIA’s Electron tray icon (`pair-ctl hide-tray`) because that tray popup closes when you leave the Omarchy bar.
+- This plugin is the only PAIR chip (`BarWidget.qml`). It hides NVIDIA’s Electron tray icon (`pair-ctl hide-tray`) because that tray popup closes when you leave the Omarchy bar.
+- Left-click must open/focus the live PAIR window (`omarchy-hyprland-focus-app nvpair` or `nvpair-desktop`). Do not route that through `pair-ctl` JSON.
+- Chip installed/running state comes from `pgrep -x nvpair` and `test -x ~/.local/opt/PAIR/nvpair`, not from QML FileView of status.json.
+- Right-click opens the helper panel (`Panel.qml`) for install / update / firewall.
 - PAIR window: first-run can install Ollama (default) or LM Studio.
 - Apps should use `http://127.0.0.1:11434` (Ollama) or `http://127.0.0.1:1234` (OpenAI).
 - Pairing other PCs uses a six-digit PIN on the same LAN.

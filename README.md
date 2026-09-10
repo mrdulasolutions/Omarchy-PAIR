@@ -32,7 +32,7 @@ The first download is about 135 MB.
 
 ## Usage
 
-This plugin is the **only** PAIR control in the Omarchy bar. NVIDIA’s Electron tray popup closes as soon as you leave the top bar on Hyprland, so the plugin hides that tray icon and owns the chip:
+This plugin is the **only** PAIR control in the Omarchy bar. NVIDIA’s Electron tray popup closes as soon as you leave the top bar on Hyprland, so the plugin hides that tray icon and owns the chip. Left-click is the tray’s working action: open or focus the PAIR window.
 
 | Action | What it does |
 | --- | --- |
@@ -225,7 +225,8 @@ omarchy-shell shell summon io.github.mrdulasolutions.pair '{}'
 | File | Role |
 | --- | --- |
 | `manifest.json` | Plugin contract |
-| `Panel.qml` | Bar icon and popup |
+| `BarWidget.qml` | Bar chip: live `pgrep`/`test` status, left-click opens PAIR |
+| `Panel.qml` | Right-click helper: install, update, firewall |
 | `Model.js` | Status JSON helpers |
 | `scripts/pair-ctl` | Install / update / launch NVIDIA PAIR |
 | `AGENTS.md` | Instructions for coding agents |

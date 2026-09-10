@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.mrdulasolutions.pair",
   "name": "NVIDIA PAIR",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "author": "MR Dula Solutions",
   "license": "MIT",
   "description": "Install, update, and launch NVIDIA Personal AI Router (PAIR) on Omarchy.",
@@ -10,11 +10,11 @@
     "bar-widget"
   ],
   "entryPoints": {
-    "barWidget": "Panel.qml"
+    "barWidget": "BarWidget.qml"
   },
   "barWidget": {
     "displayName": "PAIR",
-    "description": "Install, launch, and manage NVIDIA PAIR. Replaces the flaky Electron tray icon on Omarchy.",
+    "description": "Open NVIDIA PAIR. Right-click for install, update, and firewall.",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "right"
