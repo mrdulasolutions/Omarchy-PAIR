@@ -615,6 +615,187 @@ def cmd_extract_and_publish(rel: str) -> None:
         os.close(home_fd)
 
 
+def _is_reg(dfd: int, name: str) -> bool:
+    try:
+        st = os.lstat(name, dir_fd=dfd)
+    except FileNotFoundError:
+        return False
+    return stat.S_ISREG(st.st_mode) and not stat.S_ISLNK(st.st_mode)
+
+
+def _is_dir(dfd: int, name: str) -> bool:
+    try:
+        st = os.lstat(name, dir_fd=dfd)
+    except FileNotFoundError:
+        return False
+    return stat.S_ISDIR(st.st_mode) and not stat.S_ISLNK(st.st_mode)
+
+
+def pair_config_guard(dfd: int) -> bool:
+    """PAIR data dir: node-id.json plus cluster/ or settings.json."""
+    if not _is_reg(dfd, "node-id.json"):
+        return False
+    return _is_dir(dfd, "cluster") or _is_reg(dfd, "settings.json")
+
+
+def walk_optional(home_fd: int, parts: list[str]) -> int | None:
+    fd = os.dup(home_fd)
+    try:
+        for part in parts:
+            try:
+                nfd = os.open(part, O_FLAGS, dir_fd=fd)
+            except FileNotFoundError:
+                os.close(fd)
+                return None
+            except OSError as e:
+                os.close(fd)
+                die("cannot open %s: %s" % (part, e.strerror))
+            os.close(fd)
+            fd = nfd
+            fstat_dir(fd, must_own=True)
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def cmd_purge_pair_config() -> None:
+    home_fd = open_home()
+    try:
+        config_fd = walk_optional(home_fd, [".config"])
+        if config_fd is None:
+            return
+        try:
+            try:
+                nst = os.lstat("Nvidia Corporation", dir_fd=config_fd)
+            except FileNotFoundError:
+                return
+            if stat.S_ISLNK(nst.st_mode) or not stat.S_ISDIR(nst.st_mode):
+                die("Nvidia Corporation config path is not a real directory")
+            leftover = None
+            nvidia_fd = os.open("Nvidia Corporation", O_FLAGS, dir_fd=config_fd)
+            try:
+                try:
+                    pst = os.lstat("Personal AI Router", dir_fd=nvidia_fd)
+                except FileNotFoundError:
+                    leftover = [n for n in os.listdir(nvidia_fd) if n not in (".", "..")]
+                    pst = None
+                if pst is not None:
+                    if stat.S_ISLNK(pst.st_mode) or not stat.S_ISDIR(pst.st_mode):
+                        die("PAIR config path is not a real directory")
+                    cfg_fd = os.open("Personal AI Router", O_FLAGS, dir_fd=nvidia_fd)
+                    try:
+                        if not pair_config_guard(cfg_fd):
+                            die("refusing to purge unrecognized NVIDIA config directory")
+                        rmtree_fd(cfg_fd)
+                    finally:
+                        os.close(cfg_fd)
+                    os.rmdir("Personal AI Router", dir_fd=nvidia_fd)
+                    leftover = [n for n in os.listdir(nvidia_fd) if n not in (".", "..")]
+            finally:
+                os.close(nvidia_fd)
+            if leftover == []:
+                try:
+                    os.rmdir("Nvidia Corporation", dir_fd=config_fd)
+                except OSError:
+                    pass
+        finally:
+            os.close(config_fd)
+    finally:
+        os.close(home_fd)
+
+
+def cmd_merge_tray_hidden() -> None:
+    import json
+
+    raw_ids = sys.stdin.read(4096)
+    ids = []
+    for line in raw_ids.splitlines():
+        item = line.strip()
+        if not item or len(item) > 128:
+            continue
+        if "\x00" in item:
+            continue
+        ids.append(item)
+        if len(ids) >= 8:
+            break
+    if not ids:
+        return
+    home_fd = open_home()
+    try:
+        parent = walk(home_fd, [".config", "omarchy"], create=False)
+        try:
+            fd = os.open("shell.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+            try:
+                st = os.fstat(fd)
+                if not stat.S_ISREG(st.st_mode):
+                    die("shell.json is not a regular file")
+                if st.st_uid != UID:
+                    die("shell.json not owned by current user")
+                if st.st_size > 1_000_000:
+                    die("shell.json exceeds size cap")
+                data = b""
+                while True:
+                    chunk = os.read(fd, 65536)
+                    if not chunk:
+                        break
+                    data += chunk
+                    if len(data) > 1_000_000:
+                        die("shell.json exceeds size cap")
+            finally:
+                os.close(fd)
+            doc = json.loads(data.decode("utf-8"))
+            changed = False
+            bar = doc.get("bar")
+            layout = bar.get("layout") if isinstance(bar, dict) else None
+            if not isinstance(layout, dict):
+                return
+            for section in layout.values():
+                if not isinstance(section, list):
+                    continue
+                for entry in section:
+                    if not isinstance(entry, dict) or entry.get("id") != "omarchy.tray":
+                        continue
+                    hidden = entry.get("hidden", [])
+                    if isinstance(hidden, str):
+                        hidden = [hidden] if hidden else []
+                        changed = True
+                    if not isinstance(hidden, list):
+                        hidden = []
+                        changed = True
+                    for item in ids:
+                        if item not in hidden:
+                            hidden.append(item)
+                            changed = True
+                    entry["hidden"] = hidden
+            if not changed:
+                return
+            payload = (json.dumps(doc, indent=2) + "\n").encode("utf-8")
+            tmp = ".tmp." + secrets.token_hex(8)
+            tfd = os.open(
+                tmp,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                0o600,
+                dir_fd=parent,
+            )
+            try:
+                os.write(tfd, payload)
+                os.fsync(tfd)
+            except Exception:
+                os.close(tfd)
+                try:
+                    os.unlink(tmp, dir_fd=parent)
+                except OSError:
+                    pass
+                raise
+            os.close(tfd)
+            os.rename(tmp, "shell.json", src_dir_fd=parent, dst_dir_fd=parent)
+        finally:
+            os.close(parent)
+    finally:
+        os.close(home_fd)
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         die("usage: pathguard.py <command> ...")
@@ -637,8 +818,12 @@ def main() -> None:
         cmd_verify_file(sys.argv[2], sys.argv[3], sys.argv[4])
     elif cmd == "extract-and-publish" and len(sys.argv) == 3:
         cmd_extract_and_publish(sys.argv[2])
+    elif cmd == "purge-pair-config" and len(sys.argv) == 2:
+        cmd_purge_pair_config()
+    elif cmd == "merge-tray-hidden" and len(sys.argv) == 2:
+        cmd_merge_tray_hidden()
     else:
-        die("usage: pathguard.py ensure|atomic-write|rm-tree|unlink|chmod|copy-file|publish-dir|verify-file|extract-and-publish ...")
+        die("usage: pathguard.py ensure|atomic-write|rm-tree|unlink|chmod|copy-file|publish-dir|verify-file|extract-and-publish|purge-pair-config|merge-tray-hidden ...")
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ fi
 unset PAIR_HOME || true
 
 PLUGIN_ID="io.github.mrdulasolutions.pair"
-PLUGIN_VERSION="0.0.3"
+PLUGIN_VERSION="0.0.4"
 UPSTREAM_REPO="NVIDIA/Personal-AI-Router"
 SCRIPT_DIR=$(cd "$(dirname -- "$0")" && pwd)
 PLUGIN_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
@@ -353,11 +353,7 @@ cmd_uninstall() {
   pg unlink .local/state/omarchy-pair/installed.json 2>/dev/null || true
   if ((purge)); then
     log "purging PAIR cluster data (models in ~/.ollama are left alone)"
-    local cfg="$HOME/.config/Nvidia Corporation/Personal AI Router"
-    if [[ -d $cfg && ! -L $cfg ]]; then
-      uid=$(stat -c '%u' "$cfg")
-      [[ $uid == "$(id -u)" ]] && rm -rf -- "$cfg"
-    fi
+    pg purge-pair-config
   fi
   log "removed NVIDIA PAIR"
   emit_status 1
@@ -413,55 +409,7 @@ cmd_hide_tray() {
     emit_status 0
     return 0
   }
-  python3 - "$ids" <<'PY'
-import json, os, sys, tempfile
-from pathlib import Path
-
-new_ids = [line for line in sys.argv[1].splitlines() if line.strip()][:8]
-p = Path.home() / ".config/omarchy/shell.json"
-if not p.is_file() or p.is_symlink() or p.stat().st_size > 1_000_000:
-    sys.exit(0)
-d = json.loads(p.read_text(encoding="utf-8"))
-changed = False
-for section in d.get("bar", {}).get("layout", {}).values():
-    if not isinstance(section, list):
-        continue
-    for entry in section:
-        if entry.get("id") != "omarchy.tray":
-            continue
-        hidden = entry.get("hidden", [])
-        if isinstance(hidden, str):
-            hidden = [hidden] if hidden else []
-            changed = True
-        if not isinstance(hidden, list):
-            hidden = []
-            changed = True
-        for item in new_ids:
-            if item not in hidden:
-                hidden.append(item)
-                changed = True
-        entry["hidden"] = hidden
-if not changed:
-    sys.exit(0)
-fd, tmp = tempfile.mkstemp(prefix=".shell.", suffix=".tmp", dir=str(p.parent))
-try:
-    os.fchmod(fd, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump(d, fh, indent=2)
-        fh.write("\n")
-        fh.flush()
-        os.fsync(fh.fileno())
-        fd = None
-    os.replace(tmp, p)
-except Exception:
-    if fd is not None:
-        os.close(fd)
-    try:
-        os.unlink(tmp)
-    except OSError:
-        pass
-    raise
-PY
+  printf '%s\n' "$ids" | pg merge-tray-hidden
   log "hid NVIDIA PAIR tray icon(s): $(printf '%s' "$ids" | tr '\n' ' ')"
   emit_status 0
 }
